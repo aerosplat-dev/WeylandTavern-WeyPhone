@@ -1,0 +1,12 @@
+{
+    "display_name": "WeyPhone",
+    "loading_order": 150,
+    "requires": [],
+    "optional": ["connection-manager"],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "weyland-tavern",
+    "version": "1.0.0",
+    "homePage": "https://github.com/SillyTavern/SillyTavern",
+    "auto_update": false
+}
