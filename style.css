@@ -40,6 +40,43 @@
     align-items: center;
     padding: 8px;
     border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
+    gap: 8px;
+}
+
+/* Always-reachable close affordance, independent of the toggle button —
+   on narrow/mobile viewports the panel goes full-screen (below) and can
+   visually cover the toggle button, so closing must not depend on it. */
+#wp-panel-close {
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+    padding: 0 6px;
+    background: none;
+    border: none;
+    color: var(--SmartThemeBodyColor, #fff);
+    flex: 0 0 auto;
+}
+
+/* Mobile: present the panel as a full-screen sheet (same pattern EchoText
+   uses on mobile) instead of a small fixed-size floating box, which on
+   narrow viewports (< ~600px) either overflows or crowds out the rest of
+   the page. Hide the toggle button while the sheet is open so there's
+   never an ambiguous overlapping-fixed-element state. */
+@media (max-width: 600px) {
+    #wp-panel {
+        top: env(safe-area-inset-top, 0px);
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-height: none;
+        height: calc(100% - env(safe-area-inset-top, 0px));
+        border-radius: 0;
+    }
+
+    #wp-toggle-button.wp-panel-open {
+        display: none;
+    }
 }
 
 #wp-messages {

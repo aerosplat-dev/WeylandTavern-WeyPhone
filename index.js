@@ -131,7 +131,18 @@ function initPanel() {
 
     const toggleButton = document.getElementById('wp-toggle-button');
     const panel = document.getElementById('wp-panel');
-    toggleButton.addEventListener('click', () => panel.classList.toggle('wp-open'));
+    const closeButton = document.getElementById('wp-panel-close');
+
+    // On narrow/mobile viewports the panel becomes a full-screen sheet (see style.css) and can
+    // visually cover the toggle button, so open/close state is tracked explicitly here rather
+    // than relying on the toggle button always being reachable to close it again.
+    function setPanelOpen(open) {
+        panel.classList.toggle('wp-open', open);
+        toggleButton.classList.toggle('wp-panel-open', open);
+    }
+
+    toggleButton.addEventListener('click', () => setPanelOpen(!panel.classList.contains('wp-open')));
+    closeButton.addEventListener('click', () => setPanelOpen(false));
 
     const characterSelect = document.getElementById('wp-character-select');
     const characters = getSelectableCharacters(context.characters, EXCLUDED_CHARACTER_NAMES);
