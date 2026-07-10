@@ -12,8 +12,10 @@ let selectedCharacterName = null;
 let tetheredMode = false;
 
 // WeyPhone has no user-facing max-tokens setting yet (milestone 1), so this is a fixed default
-// passed to ConnectionManagerRequestService.sendRequest's required maxTokens argument.
-const DEFAULT_MAX_TOKENS = 512;
+// passed to ConnectionManagerRequestService.sendRequest's required maxTokens argument. 1024 is
+// still just a placeholder chosen to avoid visibly truncating conversational replies mid-
+// sentence — not a final tuned value; replace once a real user-facing setting exists.
+const DEFAULT_MAX_TOKENS = 1024;
 
 function log(...args) {
     const context = SillyTavern.getContext();

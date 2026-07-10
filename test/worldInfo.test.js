@@ -29,15 +29,19 @@ test('scanEntries is case-insensitive', () => {
     assert.equal(scanEntries(entries, history), 'Matched');
 });
 
-test('resolveWorldInfoTethered passes through getWorldInfoPrompt results unmodified', async () => {
-    const fakeGetWorldInfoPrompt = async (history, maxContext, isDryRun, globalScanData) => {
-        assert.deepEqual(history, [{ role: 'user', content: 'hi' }]);
+test('resolveWorldInfoTethered converts history into a newest-first plain string[] before calling getWorldInfoPrompt', async () => {
+    const fakeGetWorldInfoPrompt = async (chat, maxContext, isDryRun, globalScanData) => {
+        assert.deepEqual(chat, ['third', 'second', 'first']);
         assert.equal(maxContext, 4096);
         return { worldInfoBefore: 'BEFORE', worldInfoAfter: 'AFTER' };
     };
     const result = await resolveWorldInfoTethered({
         getWorldInfoPrompt: fakeGetWorldInfoPrompt,
-        history: [{ role: 'user', content: 'hi' }],
+        history: [
+            { role: 'user', content: 'first' },
+            { role: 'assistant', content: 'second' },
+            { role: 'user', content: 'third' },
+        ],
         maxContext: 4096,
     });
     assert.deepEqual(result, { worldInfoBefore: 'BEFORE', worldInfoAfter: 'AFTER' });
