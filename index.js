@@ -11,6 +11,10 @@ import { charPer } from '../../quick-reply-ext/src/charper.js';
 let selectedCharacterName = null;
 let tetheredMode = false;
 
+// WeyPhone has no user-facing max-tokens setting yet (milestone 1), so this is a fixed default
+// passed to ConnectionManagerRequestService.sendRequest's required maxTokens argument.
+const DEFAULT_MAX_TOKENS = 512;
+
 function log(...args) {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
@@ -84,8 +88,11 @@ async function handleSend() {
             scenarioText: '',
             worldInfoAfter: worldInfo.worldInfoAfter,
         });
+        const fullSystemPromptText = [systemPromptText, resolved.postHistory]
+            .filter(section => typeof section === 'string' && section.trim().length > 0)
+            .join('\n\n');
         const messages = buildMessages({
-            systemPromptText,
+            systemPromptText: fullSystemPromptText,
             history: historyForScan.map(m => ({ role: m.role, content: m.content })),
             userMessage,
         });
@@ -93,7 +100,7 @@ async function handleSend() {
         const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
         const profileId = resolveProfileId(settings, activeProfileId);
         const result = await sendMessage({
-            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs),
+            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_MAX_TOKENS),
             profileId,
             messages,
         });
