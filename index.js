@@ -165,12 +165,14 @@ function initPanel() {
     closeButton.addEventListener('click', () => setPanelOpen(false));
 
     const characterSelect = document.getElementById('wp-character-select');
-    const characters = getSelectableCharacters(context.characters, EXCLUDED_CHARACTER_NAMES);
-    renderCharacterOptions(characterSelect, characters);
     characterSelect.addEventListener('change', handleCharacterChange);
-    if (characters.length > 0) {
-        selectedCharacterName = characters[0].name;
-    }
+    // context.characters is very likely still empty at this point — SillyTavern's own extension
+    // activation (which runs this file) happens before its character list finishes loading, per
+    // the CHARACTER_PAGE_LOADED/APP_READY event ordering observed in a live browser session.
+    // Render whatever's available now (usually nothing), and refresh again once the app
+    // confirms it's fully ready.
+    refreshCharacterList(context);
+    context.eventSource.on(context.event_types.APP_READY, () => refreshCharacterList(SillyTavern.getContext()));
 
     document.getElementById('wp-tethered-checkbox').addEventListener('change', (event) => {
         tetheredMode = event.target.checked;
@@ -180,6 +182,16 @@ function initPanel() {
     document.getElementById('wp-input').addEventListener('keydown', (event) => {
         if (event.key === 'Enter') handleSend();
     });
+}
+
+function refreshCharacterList(context) {
+    const characterSelect = document.getElementById('wp-character-select');
+    const characters = getSelectableCharacters(context.characters, EXCLUDED_CHARACTER_NAMES);
+    renderCharacterOptions(characterSelect, characters);
+    if (!selectedCharacterName && characters.length > 0) {
+        selectedCharacterName = characters[0].name;
+        characterSelect.value = selectedCharacterName;
+    }
 }
 
 jQuery(async () => {
