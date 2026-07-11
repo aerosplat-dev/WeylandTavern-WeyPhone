@@ -125,9 +125,29 @@ function handleCharacterChange(event) {
     renderMessages(document.getElementById('wp-messages'), conversation.messages);
 }
 
+// SillyTavern's mobile CSS sets `body { position: fixed; overflow: hidden; }`, which breaks
+// position:fixed children appended directly to <body> (confirmed against a known, already-fixed
+// issue in the sibling EchoText extension, which hit this exact bug). The fix — also matching
+// EchoText's approach — is to mount our markup in a portal div that's a sibling of <body> (a
+// child of <html>) instead, escaping body's broken containing-block behavior on mobile entirely.
+// The portal itself has pointer-events:none so it never blocks clicks to the page underneath;
+// #wp-toggle-button/#wp-panel re-enable pointer-events on themselves (see style.css).
+const WP_PORTAL_ID = 'wp-portal';
+
+function ensurePortal() {
+    let portal = document.getElementById(WP_PORTAL_ID);
+    if (!portal) {
+        portal = document.createElement('div');
+        portal.id = WP_PORTAL_ID;
+        portal.style.cssText = 'position:fixed; top:0; left:0; width:100dvw; height:100dvh; z-index:2147483647; pointer-events:none;';
+        document.documentElement.appendChild(portal);
+    }
+    return portal;
+}
+
 function initPanel() {
     const context = SillyTavern.getContext();
-    document.body.insertAdjacentHTML('beforeend', createPanelMarkup());
+    ensurePortal().insertAdjacentHTML('beforeend', createPanelMarkup());
 
     const toggleButton = document.getElementById('wp-toggle-button');
     const panel = document.getElementById('wp-panel');
