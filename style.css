@@ -84,6 +84,15 @@
    the page. Hide the toggle button while the sheet is open so there's
    never an ambiguous overlapping-fixed-element state. */
 @media (max-width: 600px) {
+    /* Bottom-right (the desktop position) sits directly on top of the main chat's own text
+       entry/send button on mobile — move the toggle to the top-right of the chat area instead,
+       clear of the notch/status bar. Per user feedback (2026-07-11). */
+    #wp-toggle-button {
+        top: env(safe-area-inset-top, 20px);
+        bottom: auto;
+        right: 20px;
+    }
+
     #wp-panel {
         top: env(safe-area-inset-top, 0px);
         left: 0;
@@ -93,6 +102,12 @@
         max-height: none;
         height: calc(100% - env(safe-area-inset-top, 0px));
         border-radius: 0;
+        /* --SmartThemeBlurTintColor is intentionally translucent in several of this platform's
+           custom themes (glassmorphic look) — fine for a small floating box over the chat, but
+           on a full-screen mobile sheet it lets the page underneath show through distractingly.
+           Force a solid, theme-independent background here instead. Per user feedback
+           (2026-07-11): "on mobile this panel should be opaque." */
+        background: #1a1a1a;
     }
 
     #wp-toggle-button.wp-panel-open {
