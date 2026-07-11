@@ -145,9 +145,24 @@ function ensurePortal() {
     return portal;
 }
 
+// The mobile toggle-button position needs to clear SillyTavern's own top bar (#top-bar), whose
+// rendered height varies by theme/font-size/content and isn't something CSS alone can know. Read
+// it at runtime and expose it as a CSS custom property the mobile media query positions against
+// (see style.css). Re-measured on resize since mobile browser chrome (address bar collapsing,
+// etc.) can change the layout without a full reload. Per user feedback (2026-07-11): the
+// previous safe-area-only offset clipped into #top-bar's icon row.
+function updateTopBarOffset() {
+    const topBar = document.getElementById('top-bar');
+    const bottom = topBar ? topBar.getBoundingClientRect().bottom : 0;
+    document.documentElement.style.setProperty('--wp-topbar-bottom', `${Math.max(bottom, 0)}px`);
+}
+
 function initPanel() {
     const context = SillyTavern.getContext();
     ensurePortal().insertAdjacentHTML('beforeend', createPanelMarkup());
+
+    updateTopBarOffset();
+    window.addEventListener('resize', updateTopBarOffset);
 
     const toggleButton = document.getElementById('wp-toggle-button');
     const panel = document.getElementById('wp-panel');
