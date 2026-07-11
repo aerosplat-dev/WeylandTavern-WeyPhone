@@ -1,5 +1,20 @@
+/* #wp-toggle-button and #wp-panel are position:absolute, not position:fixed, relative to
+   #wp-portal (see index.js) — deliberately. #wp-portal is itself position:fixed and correctly
+   spans the real viewport (it uses dvw/dvh units, which resolve against the true viewport
+   regardless of ancestor quirks). But SillyTavern sets `transform: matrix(1,0,0,1,0,0)` on
+   <html> (an identity transform, but any non-`none` transform still counts for CSS purposes) —
+   that makes <html> the containing block for any position:fixed *descendant* whose own parent
+   doesn't also have a transform, which is exactly our portal's children. Since <html> has no
+   explicit height, that containing block resolves to 0px tall, so `bottom: 20px` was computing
+   against a 0-height box and rendering ~68px above the visible viewport. Confirmed by directly
+   inspecting computed styles/getBoundingClientRect via a live headless-browser session — this
+   isn't a guess. Using position:absolute here instead makes the portal itself (a genuine
+   positioned ancestor) the containing block directly, with no transform-chain gotcha, since
+   that rule only applies to position:fixed, not position:absolute. Matches EchoText's own
+   documented fix for the same class of issue ("Absolute instead of fixed so it maps to the
+   #et-portal container"). */
 #wp-toggle-button {
-    position: fixed;
+    position: absolute;
     bottom: 20px;
     right: 20px;
     z-index: 9999;
@@ -20,7 +35,7 @@
 }
 
 #wp-panel {
-    position: fixed;
+    position: absolute;
     bottom: 80px;
     right: 20px;
     width: 320px;
