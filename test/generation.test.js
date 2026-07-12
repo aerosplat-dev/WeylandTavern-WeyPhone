@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage } from '../lib/generation.js';
+import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat } from '../lib/generation.js';
 
 test('buildSystemPrompt joins non-empty sections in main->WIbefore->description->personality->scenario->WIafter order', () => {
     const result = buildSystemPrompt({
@@ -68,4 +68,38 @@ test('sendMessage calls sendRequest with the profileId and messages', async () =
     const result = await sendMessage({ sendRequest: fakeSendRequest, profileId: 'p1', messages: [{ role: 'user', content: 'hi' }] });
     assert.equal(result, 'the reply');
     assert.deepEqual(capturedArgs, { profileId: 'p1', messages: [{ role: 'user', content: 'hi' }] });
+});
+
+test('reconstructHistoryAsPhoneFormat wraps user turns as Outgoing lines and assistant turns as Incoming lines', () => {
+    const history = [
+        { role: 'user', content: 'hey', timestamp: 1000 },
+        { role: 'assistant', content: 'hi there', timestamp: 2000 },
+    ];
+    const fakeFormatClockTime = (ms) => `T${ms}`;
+    const result = reconstructHistoryAsPhoneFormat(history, { charName: 'Rosa', userName: 'Ava' }, fakeFormatClockTime);
+    assert.deepEqual(result, [
+        { role: 'user', content: 'Outgoing¦T1000¦Ava¦hey' },
+        { role: 'assistant', content: 'Incoming¦T2000¦Rosa¦hi there' },
+    ]);
+});
+
+test('reconstructHistoryAsPhoneFormat leaves the time field empty when a message has no timestamp', () => {
+    const history = [{ role: 'user', content: 'hey' }];
+    const fakeFormatClockTime = () => { throw new Error('should not be called'); };
+    const result = reconstructHistoryAsPhoneFormat(history, { charName: 'Rosa', userName: 'Ava' }, fakeFormatClockTime);
+    assert.deepEqual(result, [{ role: 'user', content: 'Outgoing¦¦Ava¦hey' }]);
+});
+
+test('reconstructHistoryAsPhoneFormat returns an empty array for empty history', () => {
+    assert.deepEqual(reconstructHistoryAsPhoneFormat([], { charName: 'Rosa', userName: 'Ava' }, () => ''), []);
+});
+
+test('reconstructHistoryAsPhoneFormat preserves turn order', () => {
+    const history = [
+        { role: 'user', content: 'a', timestamp: 1 },
+        { role: 'assistant', content: 'b', timestamp: 2 },
+        { role: 'user', content: 'c', timestamp: 3 },
+    ];
+    const result = reconstructHistoryAsPhoneFormat(history, { charName: 'Rosa', userName: 'Ava' }, (t) => String(t));
+    assert.deepEqual(result.map(r => r.content), ['Outgoing¦1¦Ava¦a', 'Incoming¦2¦Rosa¦b', 'Outgoing¦3¦Ava¦c']);
 });
