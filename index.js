@@ -2,7 +2,7 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat } from './lib/generation.js';
 import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
@@ -179,12 +179,12 @@ async function generateMemory(conversationId, conversation, context, settings) {
     try {
         memoryGeneratingConversationIds.add(conversationId);
         const personalityText = applySpecialCase(character.name, resolvePersonalityText(personalityConfig), {});
-        const windowMessages = conversation.messages.slice(conversation.lastMemoryMessageIndex ?? 0);
+        const window = getMemoryWindow(conversation);
         const userName = context.name1 || 'User';
         const messages = buildMemoryGenerationMessages({
             charName: character.name,
             personalityText,
-            windowMessages,
+            windowMessages: window.messages,
             userName,
             formatClockTime,
         });
@@ -200,9 +200,9 @@ async function generateMemory(conversationId, conversation, context, settings) {
         const memoryText = typeof result === 'string' ? result : (result?.content ?? '');
         if (memoryText.trim()) {
             createMemory(settings, conversationId, memoryText.trim(), {
-                sourceRange: { from: conversation.lastMemoryMessageIndex ?? 0, to: conversation.messages.length },
+                sourceRange: { from: window.start, to: window.end },
             });
-            conversation.lastMemoryMessageIndex = conversation.messages.length;
+            conversation.lastMemoryMessageIndex = window.end;
             context.saveSettingsDebounced();
             rerenderMemoryScreen();
         }

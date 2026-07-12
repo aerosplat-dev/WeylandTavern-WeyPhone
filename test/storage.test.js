@@ -18,6 +18,7 @@ import {
     setMemorySettings,
     countExchangesSince,
     migrateMemoryFields,
+    getMemoryWindow,
 } from '../lib/storage.js';
 
 test('createConversation creates a conversation with a generated id and empty messages', () => {
@@ -387,4 +388,40 @@ test('discardTrailingReply returns false when there is no user message before th
 test('discardTrailingReply returns false for an unknown conversation id', () => {
     const settings = { conversations: {} };
     assert.equal(discardTrailingReply(settings, 'nonexistent'), false);
+});
+
+test('getMemoryWindow returns the full message range when lastMemoryMessageIndex is unset', () => {
+    const conversation = { messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }] };
+    const window = getMemoryWindow(conversation);
+    assert.equal(window.start, 0);
+    assert.equal(window.end, 2);
+    assert.deepEqual(window.messages, conversation.messages);
+});
+
+test('getMemoryWindow returns only messages after lastMemoryMessageIndex', () => {
+    const conversation = {
+        messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }, { role: 'user', content: 'c' }, { role: 'assistant', content: 'd' }],
+        lastMemoryMessageIndex: 2,
+    };
+    const window = getMemoryWindow(conversation);
+    assert.equal(window.start, 2);
+    assert.equal(window.end, 4);
+    assert.deepEqual(window.messages, [{ role: 'user', content: 'c' }, { role: 'assistant', content: 'd' }]);
+});
+
+test('getMemoryWindow returns an empty window when lastMemoryMessageIndex is already at the end', () => {
+    const conversation = { messages: [{ role: 'user', content: 'a' }], lastMemoryMessageIndex: 1 };
+    const window = getMemoryWindow(conversation);
+    assert.equal(window.start, 1);
+    assert.equal(window.end, 1);
+    assert.deepEqual(window.messages, []);
+});
+
+test('getMemoryWindow computed end is stable even if the conversation grows afterward (proves the fix this was extracted for)', () => {
+    const conversation = { messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }], lastMemoryMessageIndex: 0 };
+    const window = getMemoryWindow(conversation);
+    // Simulate a Send/Regenerate landing on the conversation while a caller is still holding
+    // onto `window` (e.g. awaiting an LLM call) — window.end must NOT reflect this later growth.
+    conversation.messages.push({ role: 'user', content: 'c' }, { role: 'assistant', content: 'd' });
+    assert.equal(window.end, 2);
 });
