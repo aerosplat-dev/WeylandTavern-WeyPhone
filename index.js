@@ -2,28 +2,35 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat } from './lib/generation.js';
-import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled } from './lib/panel.js';
+import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap } from './lib/portraits.js';
 import { parseReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
+import { buildMemoryGenerationMessages, joinMemoriesForInjection } from './lib/memoryGeneration.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
-let currentView = 'home'; // 'home' | 'contacts' | 'conversation'
+let currentView = 'home'; // 'home' | 'contacts' | 'conversation' | 'memory'
 let currentConversationId = null;
 let editingMessageIndex = -1;
+let editingMemoryId = null;
 let tetheredMode = false;
 const generatingConversationIds = new Set();
+// Separate, deliberately invisible tracking for the background memory-summarization job — never
+// touches generatingConversationIds, never shows a typing indicator, never disables Regenerate.
+const memoryGeneratingConversationIds = new Set();
 
 // WeyPhone has no user-facing max-tokens setting yet (milestone 1), so this is a fixed default
 // passed to ConnectionManagerRequestService.sendRequest's required maxTokens argument. 1024 is
 // still just a placeholder chosen to avoid visibly truncating conversational replies mid-
 // sentence — not a final tuned value; replace once a real user-facing setting exists.
 const DEFAULT_MAX_TOKENS = 1024;
+// Memory entries are meant to be short (2-4 sentences) — a much smaller cap than regular replies.
+const DEFAULT_MEMORY_MAX_TOKENS = 256;
 
 function log(...args) {
     const context = SillyTavern.getContext();
@@ -75,11 +82,6 @@ function updateRegenerateEnabled(conversation) {
     const button = document.getElementById('wp-regenerate-button');
     if (!button) return;
     const isGenerating = generatingConversationIds.has(currentConversationId);
-    // Must mirror discardTrailingReply's own requirement (lib/storage.js): there needs to be a
-    // trailing run of assistant messages with something (a user message) before it. Just
-    // checking for "any user message anywhere" (the old condition) enabled the button even when
-    // the conversation currently ends on a dangling user turn (e.g. after a failed generation),
-    // in which case Regenerate would silently no-op.
     const messages = conversation.messages;
     let cutIndex = messages.length;
     while (cutIndex > 0 && messages[cutIndex - 1].role === 'assistant') cutIndex--;
@@ -141,10 +143,80 @@ function refreshVisibleScreen() {
     }
 }
 
+// Re-renders the Memory view (list + settings shell, repopulated) if it's currently visible —
+// called after any memory CRUD action or settings change.
+function rerenderMemoryScreen() {
+    if (currentView !== 'memory' || !currentConversationId) return;
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, currentConversationId);
+    if (!conversation) return;
+    const screenBody = document.getElementById('wp-screen-body');
+    if (!screenBody) return;
+    renderMemoryScreen(screenBody, conversation.memories || [], editingMemoryId);
+    const profiles = context.ConnectionManagerRequestService.getSupportedProfiles();
+    populateConnectionProfileOptions(document.getElementById('wp-memory-profile-select'), profiles, conversation.memoryConnectionProfileId || '');
+    document.getElementById('wp-memory-threshold-input').value = conversation.memoryThreshold || 100;
+}
+
+// Background, silent memory-summarization job — deliberately has no visible effect beyond the
+// memory eventually appearing in the Memory view once saveSettingsDebounced() flushes. Never
+// shows a toastr, never participates in the typing indicator or Regenerate's disabled state, per
+// the design spec's explicit "no UI indicator" requirement.
+//
+// generatingConversationIds.add()/refreshVisibleScreen()-style pattern applies here too: the
+// memoryGeneratingConversationIds.add() call MUST stay inside this try block — this bug class
+// (a tracking-set mutation placed before try, leaking a stuck entry if anything before try
+// throws) has already recurred three times in this project via a plan's own example code
+// (milestones 2, 3, 4's final/task reviews). Keep it as the first statement inside try.
+async function generateMemory(conversationId, conversation, context, settings) {
+    if (memoryGeneratingConversationIds.has(conversationId)) return;
+    const character = context.characters.find(c => c.name === conversation.charName);
+    if (!character) return;
+    const personalityConfig = charPer.get(character.name);
+    if (!personalityConfig) return;
+
+    try {
+        memoryGeneratingConversationIds.add(conversationId);
+        const personalityText = applySpecialCase(character.name, resolvePersonalityText(personalityConfig), {});
+        const windowMessages = conversation.messages.slice(conversation.lastMemoryMessageIndex ?? 0);
+        const userName = context.name1 || 'User';
+        const messages = buildMemoryGenerationMessages({
+            charName: character.name,
+            personalityText,
+            windowMessages,
+            userName,
+            formatClockTime,
+        });
+
+        const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
+        const profileId = resolveProfileId({ connectionProfileId: conversation.memoryConnectionProfileId }, activeProfileId);
+        const result = await sendMessage({
+            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_MEMORY_MAX_TOKENS),
+            profileId,
+            messages,
+        });
+
+        const memoryText = typeof result === 'string' ? result : (result?.content ?? '');
+        if (memoryText.trim()) {
+            createMemory(settings, conversationId, memoryText.trim(), {
+                sourceRange: { from: conversation.lastMemoryMessageIndex ?? 0, to: conversation.messages.length },
+            });
+            conversation.lastMemoryMessageIndex = conversation.messages.length;
+            context.saveSettingsDebounced();
+            rerenderMemoryScreen();
+        }
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Memory generation failed:`, error);
+    } finally {
+        memoryGeneratingConversationIds.delete(conversationId);
+    }
+}
+
 // Shared by handleSend (after appending the user's new message) and handleRegenerate (after
 // discardTrailingReply leaves the conversation ending on the message to resend) — resolves the
-// prompt, builds the request (including the always-texting instructions and phone-format
-// history), sends it, and stores each extracted message from the reply.
+// prompt, builds the request (including the always-texting instructions, phone-format history,
+// and any pinned memories), sends it, and stores each extracted message from the reply.
 async function generateReply(conversationId, conversation, context, settings) {
     const character = context.characters.find(c => c.name === conversation.charName);
     if (!character) {
@@ -163,13 +235,18 @@ async function generateReply(conversationId, conversation, context, settings) {
         const resolved = await resolveCharacterPrompt(context, character);
         const historyForScan = conversation.messages.slice(0, -1);
         const worldInfo = await resolveWorldInfo(context, historyForScan);
+        const pinnedMemories = getPinnedMemories(settings, conversationId);
+        const memoryBlock = joinMemoriesForInjection(pinnedMemories);
+        const worldInfoAfterWithMemory = [worldInfo.worldInfoAfter, memoryBlock]
+            .filter(section => typeof section === 'string' && section.trim().length > 0)
+            .join('\n\n');
         const systemPromptText = buildSystemPrompt({
             systemPrompt: resolved.systemPrompt,
             worldInfoBefore: worldInfo.worldInfoBefore,
             descriptionText: resolved.descriptionText,
             personalityText: resolved.personalityText,
             scenarioText: '',
-            worldInfoAfter: worldInfo.worldInfoAfter,
+            worldInfoAfter: worldInfoAfterWithMemory,
         });
         const fullSystemPromptText = [systemPromptText, resolved.postHistory, TEXTING_MODE_INSTRUCTIONS]
             .filter(section => typeof section === 'string' && section.trim().length > 0)
@@ -204,6 +281,12 @@ async function generateReply(conversationId, conversation, context, settings) {
         }
         rerenderIfStillViewing(conversationId, conversation.messages);
         context.saveSettingsDebounced();
+
+        const exchangeCount = countExchangesSince(conversation.messages, conversation.lastMemoryMessageIndex ?? 0);
+        if (exchangeCount >= (conversation.memoryThreshold ?? 100)) {
+            // Fire-and-forget — must not delay this function's own finally cleanup below.
+            generateMemory(conversationId, conversation, context, settings);
+        }
     } catch (error) {
         console.error(`[${MODULE_NAME}] Generation failed:`, error);
         toastr.error(error.message, 'WeyPhone');
@@ -264,6 +347,46 @@ function closeRegenerateMenu() {
     if (menu) menu.hidden = true;
 }
 
+function handleAddMemory() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const textarea = document.getElementById('wp-memory-add-input');
+    if (!textarea || !currentConversationId) return;
+    const content = textarea.value.trim();
+    if (!content) return;
+    createMemory(settings, currentConversationId, content, { pinned: true, sourceRange: null });
+    context.saveSettingsDebounced();
+    rerenderMemoryScreen();
+}
+
+function handleToggleMemoryPin(memoryId, pinned) {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    setMemoryPinned(settings, currentConversationId, memoryId, pinned);
+    context.saveSettingsDebounced();
+    rerenderMemoryScreen();
+}
+
+function handleConfirmMemoryEdit(memoryId) {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const textarea = document.querySelector('.wp-memory-edit-textarea');
+    if (!textarea) return;
+    editMemory(settings, currentConversationId, memoryId, textarea.value);
+    context.saveSettingsDebounced();
+    editingMemoryId = null;
+    rerenderMemoryScreen();
+}
+
+function handleDeleteMemory(memoryId) {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    deleteMemory(settings, currentConversationId, memoryId);
+    context.saveSettingsDebounced();
+    editingMemoryId = null;
+    rerenderMemoryScreen();
+}
+
 function handleStartConversation(charName) {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
@@ -317,6 +440,45 @@ function handleScreenBodyClick(event) {
         handleRegenerate();
         return;
     }
+    const memoryMenuItem = event.target.closest('.wp-popup-menu-item[data-action="memory"]');
+    if (memoryMenuItem) {
+        closeRegenerateMenu();
+        editingMemoryId = null;
+        showScreen('memory');
+        return;
+    }
+    const memoryAddBtn = event.target.closest('#wp-memory-add-button');
+    if (memoryAddBtn) {
+        handleAddMemory();
+        return;
+    }
+    const memoryPinBtn = event.target.closest('.wp-memory-pin-btn');
+    if (memoryPinBtn) {
+        handleToggleMemoryPin(memoryPinBtn.dataset.id, !memoryPinBtn.classList.contains('wp-memory-pinned'));
+        return;
+    }
+    const memoryEditBtn = event.target.closest('.wp-memory-edit-btn');
+    if (memoryEditBtn) {
+        editingMemoryId = memoryEditBtn.dataset.id;
+        rerenderMemoryScreen();
+        return;
+    }
+    const memoryEditConfirm = event.target.closest('.wp-memory-edit-confirm');
+    if (memoryEditConfirm) {
+        handleConfirmMemoryEdit(memoryEditConfirm.dataset.id);
+        return;
+    }
+    const memoryEditCancel = event.target.closest('.wp-memory-edit-cancel');
+    if (memoryEditCancel) {
+        editingMemoryId = null;
+        rerenderMemoryScreen();
+        return;
+    }
+    const memoryDeleteBtn = event.target.closest('.wp-memory-delete-btn');
+    if (memoryDeleteBtn) {
+        handleDeleteMemory(memoryDeleteBtn.dataset.id);
+        return;
+    }
     if (event.target.closest('#wp-send-button')) {
         handleSend();
         return;
@@ -360,6 +522,17 @@ function handleScreenBodyClick(event) {
     }
 }
 
+function handleScreenBodyChange(event) {
+    if (event.target.id !== 'wp-memory-profile-select' && event.target.id !== 'wp-memory-threshold-input') return;
+    if (!currentConversationId) return;
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const profileId = document.getElementById('wp-memory-profile-select').value;
+    const threshold = Number(document.getElementById('wp-memory-threshold-input').value) || 100;
+    setMemorySettings(settings, currentConversationId, { memoryConnectionProfileId: profileId, memoryThreshold: threshold });
+    context.saveSettingsDebounced();
+}
+
 function showScreen(view) {
     currentView = view;
     const context = SillyTavern.getContext();
@@ -382,6 +555,19 @@ function showScreen(view) {
         const characters = getSelectableCharacters(context.characters, EXCLUDED_CHARACTER_NAMES);
         const portraitMap = buildPortraitMap(context.characters, characters.map(c => c.name), context.getThumbnailUrl);
         renderContactsScreen(screenBody, characters, portraitMap);
+        return;
+    }
+
+    if (view === 'memory') {
+        const conversation = getConversation(settings, currentConversationId);
+        if (!conversation) {
+            showScreen('home');
+            return;
+        }
+        title.textContent = 'Memory';
+        const portraitMap = buildPortraitMap(context.characters, [conversation.charName], context.getThumbnailUrl);
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[conversation.charName]);
+        rerenderMemoryScreen();
         return;
     }
 
@@ -442,6 +628,7 @@ function initPanel() {
     const panel = document.getElementById('wp-panel');
     const closeButton = document.getElementById('wp-panel-close');
     const homeButton = document.getElementById('wp-home-button');
+    const backButton = document.getElementById('wp-back-button');
     const composeButton = document.getElementById('wp-compose-button');
 
     // On narrow/mobile viewports the panel becomes a full-screen sheet (see style.css) and can
@@ -458,6 +645,7 @@ function initPanel() {
     toggleButton.addEventListener('click', () => setPanelOpen(!panel.classList.contains('wp-open')));
     closeButton.addEventListener('click', () => setPanelOpen(false));
     homeButton.addEventListener('click', () => showScreen('home'));
+    backButton.addEventListener('click', () => showScreen('conversation'));
     composeButton.addEventListener('click', () => showScreen('contacts'));
 
     // Markup/CSS-only restyle (toggle switch) — this listener and everything downstream of
@@ -481,6 +669,7 @@ function initPanel() {
     // get destroyed and recreated.
     const screenBody = document.getElementById('wp-screen-body');
     screenBody.addEventListener('click', handleScreenBodyClick);
+    screenBody.addEventListener('change', handleScreenBodyChange);
     screenBody.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && event.target.id === 'wp-input') {
             handleSend();
