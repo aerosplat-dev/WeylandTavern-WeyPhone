@@ -2,13 +2,16 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { getConversation, appendMessage } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteConversation, getAllConversationSummaries } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage } from './lib/generation.js';
-import { createPanelMarkup, renderCharacterOptions, renderMessages } from './lib/panel.js';
+import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages } from './lib/panel.js';
+import { formatRelativeTime } from './lib/formatTime.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
-let selectedCharacterName = null;
+let currentView = 'home'; // 'home' | 'contacts' | 'conversation'
+let currentConversationId = null;
+let editingMessageIndex = -1;
 let tetheredMode = false;
 
 // WeyPhone has no user-facing max-tokens setting yet (milestone 1), so this is a fixed default
@@ -63,20 +66,30 @@ async function resolveWorldInfo(context, history) {
     });
 }
 
+function rerenderConversationMessages() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, currentConversationId);
+    if (!conversation) return;
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex);
+}
+
 async function handleSend() {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const input = document.getElementById('wp-input');
     const userMessage = input.value.trim();
-    if (!userMessage || !selectedCharacterName) return;
+    if (!userMessage || !currentConversationId) return;
     input.value = '';
 
-    const character = context.characters.find(c => c.name === selectedCharacterName);
+    const conversation = getConversation(settings, currentConversationId);
+    if (!conversation) return;
+    const character = context.characters.find(c => c.name === conversation.charName);
     if (!character) return;
 
-    const conversation = getConversation(settings, selectedCharacterName);
-    appendMessage(settings, selectedCharacterName, { role: 'user', content: userMessage });
-    renderMessages(document.getElementById('wp-messages'), conversation.messages);
+    appendMessage(settings, currentConversationId, { role: 'user', content: userMessage });
+    editingMessageIndex = -1;
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex);
 
     try {
         const resolved = await resolveCharacterPrompt(context, character);
@@ -108,8 +121,8 @@ async function handleSend() {
         });
 
         const replyText = typeof result === 'string' ? result : (result?.content ?? '');
-        appendMessage(settings, selectedCharacterName, { role: 'assistant', content: replyText });
-        renderMessages(document.getElementById('wp-messages'), conversation.messages);
+        appendMessage(settings, currentConversationId, { role: 'assistant', content: replyText });
+        renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex);
         context.saveSettingsDebounced();
     } catch (error) {
         console.error(`[${MODULE_NAME}] Generation failed:`, error);
@@ -117,12 +130,124 @@ async function handleSend() {
     }
 }
 
-function handleCharacterChange(event) {
-    selectedCharacterName = event.target.value;
+function handleStartConversation(charName) {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
-    const conversation = getConversation(settings, selectedCharacterName);
-    renderMessages(document.getElementById('wp-messages'), conversation.messages);
+    const conversation = createConversation(settings, charName);
+    context.saveSettingsDebounced();
+    currentConversationId = conversation.id;
+    showScreen('conversation');
+}
+
+function handleDeleteConversation(id) {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    deleteConversation(settings, id);
+    context.saveSettingsDebounced();
+    if (currentConversationId === id) {
+        currentConversationId = null;
+    }
+    showScreen('home');
+}
+
+function handleConfirmEdit(bubbleEl) {
+    const index = Number(bubbleEl.dataset.index);
+    const textarea = bubbleEl.querySelector('.wp-message-edit-textarea');
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    editMessage(settings, currentConversationId, index, textarea.value);
+    context.saveSettingsDebounced();
+    editingMessageIndex = -1;
+    rerenderConversationMessages();
+}
+
+function handleDeleteMessage(bubbleEl) {
+    const index = Number(bubbleEl.dataset.index);
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    deleteMessage(settings, currentConversationId, index);
+    context.saveSettingsDebounced();
+    editingMessageIndex = -1;
+    rerenderConversationMessages();
+}
+
+function handleScreenBodyClick(event) {
+    if (event.target.closest('#wp-send-button')) {
+        handleSend();
+        return;
+    }
+    const deleteConvoBtn = event.target.closest('.wp-list-item-delete');
+    if (deleteConvoBtn) {
+        event.stopPropagation();
+        handleDeleteConversation(deleteConvoBtn.dataset.id);
+        return;
+    }
+    const conversationItem = event.target.closest('.wp-conversation-item');
+    if (conversationItem) {
+        currentConversationId = conversationItem.dataset.id;
+        showScreen('conversation');
+        return;
+    }
+    const contactItem = event.target.closest('.wp-contact-item');
+    if (contactItem) {
+        handleStartConversation(contactItem.dataset.name);
+        return;
+    }
+    const editBtn = event.target.closest('.wp-message-edit-btn');
+    if (editBtn) {
+        editingMessageIndex = Number(editBtn.closest('.wp-message').dataset.index);
+        rerenderConversationMessages();
+        return;
+    }
+    const confirmBtn = event.target.closest('.wp-message-edit-confirm');
+    if (confirmBtn) {
+        handleConfirmEdit(confirmBtn.closest('.wp-message'));
+        return;
+    }
+    const deleteMsgBtn = event.target.closest('.wp-message-edit-delete');
+    if (deleteMsgBtn) {
+        handleDeleteMessage(deleteMsgBtn.closest('.wp-message'));
+        return;
+    }
+    const cancelBtn = event.target.closest('.wp-message-edit-cancel');
+    if (cancelBtn) {
+        editingMessageIndex = -1;
+        rerenderConversationMessages();
+    }
+}
+
+function showScreen(view) {
+    currentView = view;
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const panel = document.getElementById('wp-panel');
+    const title = document.getElementById('wp-panel-title');
+    const screenBody = document.getElementById('wp-screen-body');
+    panel.dataset.view = view;
+
+    if (view === 'home') {
+        title.textContent = 'Messages';
+        renderHomeScreen(screenBody, getAllConversationSummaries(settings), formatRelativeTime);
+        return;
+    }
+
+    if (view === 'contacts') {
+        title.textContent = 'New Message';
+        const characters = getSelectableCharacters(context.characters, EXCLUDED_CHARACTER_NAMES);
+        renderContactsScreen(screenBody, characters);
+        return;
+    }
+
+    // view === 'conversation'
+    const conversation = getConversation(settings, currentConversationId);
+    if (!conversation) {
+        showScreen('home');
+        return;
+    }
+    title.textContent = conversation.charName;
+    renderConversationScreen(screenBody);
+    editingMessageIndex = -1;
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex);
 }
 
 // SillyTavern's mobile CSS sets `body { position: fixed; overflow: hidden; }`, which breaks
@@ -149,8 +274,7 @@ function ensurePortal() {
 // rendered height varies by theme/font-size/content and isn't something CSS alone can know. Read
 // it at runtime and expose it as a CSS custom property the mobile media query positions against
 // (see style.css). Re-measured on resize since mobile browser chrome (address bar collapsing,
-// etc.) can change the layout without a full reload. Per user feedback (2026-07-11): the
-// previous safe-area-only offset clipped into #top-bar's icon row.
+// etc.) can change the layout without a full reload.
 function updateTopBarOffset() {
     const topBar = document.getElementById('top-bar');
     const bottom = topBar ? topBar.getBoundingClientRect().bottom : 0;
@@ -158,7 +282,6 @@ function updateTopBarOffset() {
 }
 
 function initPanel() {
-    const context = SillyTavern.getContext();
     ensurePortal().insertAdjacentHTML('beforeend', createPanelMarkup());
 
     updateTopBarOffset();
@@ -167,6 +290,8 @@ function initPanel() {
     const toggleButton = document.getElementById('wp-toggle-button');
     const panel = document.getElementById('wp-panel');
     const closeButton = document.getElementById('wp-panel-close');
+    const homeButton = document.getElementById('wp-home-button');
+    const composeButton = document.getElementById('wp-compose-button');
 
     // On narrow/mobile viewports the panel becomes a full-screen sheet (see style.css) and can
     // visually cover the toggle button, so open/close state is tracked explicitly here rather
@@ -174,39 +299,30 @@ function initPanel() {
     function setPanelOpen(open) {
         panel.classList.toggle('wp-open', open);
         toggleButton.classList.toggle('wp-panel-open', open);
+        if (open) {
+            showScreen('home');
+        }
     }
 
     toggleButton.addEventListener('click', () => setPanelOpen(!panel.classList.contains('wp-open')));
     closeButton.addEventListener('click', () => setPanelOpen(false));
-
-    const characterSelect = document.getElementById('wp-character-select');
-    characterSelect.addEventListener('change', handleCharacterChange);
-    // context.characters is very likely still empty at this point — SillyTavern's own extension
-    // activation (which runs this file) happens before its character list finishes loading, per
-    // the CHARACTER_PAGE_LOADED/APP_READY event ordering observed in a live browser session.
-    // Render whatever's available now (usually nothing), and refresh again once the app
-    // confirms it's fully ready.
-    refreshCharacterList(context);
-    context.eventSource.on(context.event_types.APP_READY, () => refreshCharacterList(SillyTavern.getContext()));
+    homeButton.addEventListener('click', () => showScreen('home'));
+    composeButton.addEventListener('click', () => showScreen('contacts'));
 
     document.getElementById('wp-tethered-checkbox').addEventListener('change', (event) => {
         tetheredMode = event.target.checked;
     });
 
-    document.getElementById('wp-send-button').addEventListener('click', handleSend);
-    document.getElementById('wp-input').addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') handleSend();
+    // Screen content is fully replaced on every navigation (see showScreen), so listeners are
+    // delegated on the stable #wp-screen-body container rather than attached to elements that
+    // get destroyed and recreated.
+    const screenBody = document.getElementById('wp-screen-body');
+    screenBody.addEventListener('click', handleScreenBodyClick);
+    screenBody.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && event.target.id === 'wp-input') {
+            handleSend();
+        }
     });
-}
-
-function refreshCharacterList(context) {
-    const characterSelect = document.getElementById('wp-character-select');
-    const characters = getSelectableCharacters(context.characters, EXCLUDED_CHARACTER_NAMES);
-    renderCharacterOptions(characterSelect, characters);
-    if (!selectedCharacterName && characters.length > 0) {
-        selectedCharacterName = characters[0].name;
-        characterSelect.value = selectedCharacterName;
-    }
 }
 
 jQuery(async () => {
