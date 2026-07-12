@@ -40,6 +40,86 @@ test('buildMessages produces a system message, then history, then the new user m
     ]);
 });
 
+test('buildMessages coalesces 3 consecutive assistant history entries into one newline-joined message', () => {
+    const result = buildMessages({
+        systemPromptText: 'SYSTEM',
+        history: [
+            { role: 'user', content: 'hey' },
+            { role: 'assistant', content: 'burst 1' },
+            { role: 'assistant', content: 'burst 2' },
+            { role: 'assistant', content: 'burst 3' },
+        ],
+        userMessage: 'new message',
+    });
+    assert.deepEqual(result, [
+        { role: 'system', content: 'SYSTEM' },
+        { role: 'user', content: 'hey' },
+        { role: 'assistant', content: 'burst 1\nburst 2\nburst 3' },
+        { role: 'user', content: 'new message' },
+    ]);
+});
+
+test('buildMessages coalesces 2 consecutive user history entries (dangling-user-turn scenario)', () => {
+    const result = buildMessages({
+        systemPromptText: 'SYSTEM',
+        history: [
+            { role: 'assistant', content: 'earlier reply' },
+            { role: 'user', content: 'first attempt' },
+            { role: 'user', content: 'retry after failed generation' },
+        ],
+        userMessage: 'new message',
+    });
+    assert.deepEqual(result, [
+        { role: 'system', content: 'SYSTEM' },
+        { role: 'assistant', content: 'earlier reply' },
+        { role: 'user', content: 'first attempt\nretry after failed generation' },
+        { role: 'user', content: 'new message' },
+    ]);
+});
+
+test('buildMessages leaves strictly-alternating history unaffected (one message per entry)', () => {
+    const result = buildMessages({
+        systemPromptText: 'SYSTEM',
+        history: [
+            { role: 'user', content: 'a' },
+            { role: 'assistant', content: 'b' },
+            { role: 'user', content: 'c' },
+            { role: 'assistant', content: 'd' },
+        ],
+        userMessage: 'new message',
+    });
+    assert.deepEqual(result, [
+        { role: 'system', content: 'SYSTEM' },
+        { role: 'user', content: 'a' },
+        { role: 'assistant', content: 'b' },
+        { role: 'user', content: 'c' },
+        { role: 'assistant', content: 'd' },
+        { role: 'user', content: 'new message' },
+    ]);
+});
+
+test('buildMessages coalescing does not touch the leading system message or the trailing userMessage', () => {
+    // Leading system message must never merge with a same-role-looking history entry, and the
+    // trailing userMessage is always its own final message even if the last history entry is
+    // also role:'user' (coalescing only applies within `history` itself).
+    const result = buildMessages({
+        systemPromptText: 'SYSTEM',
+        history: [
+            { role: 'assistant', content: 'x' },
+            { role: 'user', content: 'y' },
+        ],
+        userMessage: 'z',
+    });
+    assert.deepEqual(result, [
+        { role: 'system', content: 'SYSTEM' },
+        { role: 'assistant', content: 'x' },
+        { role: 'user', content: 'y' },
+        { role: 'user', content: 'z' },
+    ]);
+    assert.equal(result[0].role, 'system');
+    assert.equal(result.length, 4);
+});
+
 test('resolveProfileId prefers the WeyPhone override when set', () => {
     assert.equal(resolveProfileId({ connectionProfileId: 'override-id' }, 'active-id'), 'override-id');
 });

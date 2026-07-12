@@ -75,7 +75,15 @@ function updateRegenerateEnabled(conversation) {
     const button = document.getElementById('wp-regenerate-button');
     if (!button) return;
     const isGenerating = generatingConversationIds.has(currentConversationId);
-    const hasRegeneratable = conversation.messages.some(m => m.role === 'user');
+    // Must mirror discardTrailingReply's own requirement (lib/storage.js): there needs to be a
+    // trailing run of assistant messages with something (a user message) before it. Just
+    // checking for "any user message anywhere" (the old condition) enabled the button even when
+    // the conversation currently ends on a dangling user turn (e.g. after a failed generation),
+    // in which case Regenerate would silently no-op.
+    const messages = conversation.messages;
+    let cutIndex = messages.length;
+    while (cutIndex > 0 && messages[cutIndex - 1].role === 'assistant') cutIndex--;
+    const hasRegeneratable = cutIndex > 0 && cutIndex < messages.length;
     setRegenerateEnabled(button, hasRegeneratable && !isGenerating);
 }
 
