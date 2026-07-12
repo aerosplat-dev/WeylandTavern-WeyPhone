@@ -2,12 +2,14 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteConversation, getAllConversationSummaries } from './lib/storage.js';
-import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage } from './lib/generation.js';
-import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar } from './lib/panel.js';
-import { formatRelativeTime } from './lib/formatTime.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply } from './lib/storage.js';
+import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat } from './lib/generation.js';
+import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled } from './lib/panel.js';
+import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap } from './lib/portraits.js';
+import { parseReply } from './lib/messageParsing.js';
+import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
@@ -15,8 +17,6 @@ let currentView = 'home'; // 'home' | 'contacts' | 'conversation'
 let currentConversationId = null;
 let editingMessageIndex = -1;
 let tetheredMode = false;
-// Replaces the single global `isSending` lock from milestone 2 — tracks in-flight generations
-// per conversation id, so sending in one conversation no longer blocks sending in another.
 const generatingConversationIds = new Set();
 
 // WeyPhone has no user-facing max-tokens setting yet (milestone 1), so this is a fixed default
@@ -71,15 +71,22 @@ async function resolveWorldInfo(context, history) {
     });
 }
 
+function updateRegenerateEnabled(conversation) {
+    const button = document.getElementById('wp-regenerate-button');
+    if (!button) return;
+    const isGenerating = generatingConversationIds.has(currentConversationId);
+    const hasRegeneratable = conversation.messages.some(m => m.role === 'user');
+    setRegenerateEnabled(button, hasRegeneratable && !isGenerating);
+}
+
 function rerenderConversationMessages() {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, currentConversationId);
     if (!conversation) return;
-    const messagesEl = document.getElementById('wp-messages');
-    if (!messagesEl) return;
     const isTyping = generatingConversationIds.has(currentConversationId);
-    renderMessages(messagesEl, conversation.messages, editingMessageIndex, isTyping);
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping);
+    updateRegenerateEnabled(conversation);
 }
 
 // Re-renders the conversation view for `conversationId` only if the panel is still showing
@@ -92,6 +99,10 @@ function rerenderIfStillViewing(conversationId, messages) {
     if (!messagesEl) return;
     const isTyping = generatingConversationIds.has(conversationId);
     renderMessages(messagesEl, messages, editingMessageIndex, isTyping);
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, conversationId);
+    if (conversation) updateRegenerateEnabled(conversation);
 }
 
 // Shared by showScreen('home') and refreshVisibleScreen()'s home branch — builds the Home list's
@@ -122,32 +133,20 @@ function refreshVisibleScreen() {
     }
 }
 
-async function handleSend() {
-    const context = SillyTavern.getContext();
-    const settings = getSettings(context.extensionSettings);
-    const input = document.getElementById('wp-input');
-    const userMessage = input.value.trim();
-    if (!userMessage || !currentConversationId) return;
-    // Captured now, not re-read after the generation await below — currentConversationId can
-    // change (or become null) while this function is awaiting, if the user navigates elsewhere.
-    const conversationId = currentConversationId;
-    // Per-conversation guard (was a single global `isSending` lock in milestone 2) — sending in a
-    // different conversation while this one is generating is now allowed, not blocked.
-    if (generatingConversationIds.has(conversationId)) return;
-    input.value = '';
-
-    const conversation = getConversation(settings, conversationId);
-    if (!conversation) return;
+// Shared by handleSend (after appending the user's new message) and handleRegenerate (after
+// discardTrailingReply leaves the conversation ending on the message to resend) — resolves the
+// prompt, builds the request (including the always-texting instructions and phone-format
+// history), sends it, and stores each extracted message from the reply.
+async function generateReply(conversationId, conversation, context, settings) {
     const character = context.characters.find(c => c.name === conversation.charName);
-    if (!character) return;
+    if (!character) {
+        toastr.error(`Could not find character "${conversation.charName}" for this conversation.`, 'WeyPhone');
+        return;
+    }
 
+    generatingConversationIds.add(conversationId);
+    refreshVisibleScreen();
     try {
-        generatingConversationIds.add(conversationId);
-        refreshVisibleScreen();
-        appendMessage(settings, conversationId, { role: 'user', content: userMessage });
-        editingMessageIndex = -1;
-        rerenderIfStillViewing(conversationId, conversation.messages);
-
         const resolved = await resolveCharacterPrompt(context, character);
         const historyForScan = conversation.messages.slice(0, -1);
         const worldInfo = await resolveWorldInfo(context, historyForScan);
@@ -159,13 +158,19 @@ async function handleSend() {
             scenarioText: '',
             worldInfoAfter: worldInfo.worldInfoAfter,
         });
-        const fullSystemPromptText = [systemPromptText, resolved.postHistory]
+        const fullSystemPromptText = [systemPromptText, resolved.postHistory, TEXTING_MODE_INSTRUCTIONS]
             .filter(section => typeof section === 'string' && section.trim().length > 0)
             .join('\n\n');
+
+        const userName = context.name1 || 'User';
+        const lastMessage = conversation.messages[conversation.messages.length - 1];
+        const reconstructedHistory = reconstructHistoryAsPhoneFormat(historyForScan, { charName: character.name, userName }, formatClockTime);
+        const wrappedUserMessage = reconstructHistoryAsPhoneFormat([lastMessage], { charName: character.name, userName }, formatClockTime)[0].content;
+
         const messages = buildMessages({
             systemPromptText: fullSystemPromptText,
-            history: historyForScan.map(m => ({ role: m.role, content: m.content })),
-            userMessage,
+            history: reconstructedHistory,
+            userMessage: wrappedUserMessage,
         });
 
         const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
@@ -177,7 +182,13 @@ async function handleSend() {
         });
 
         const replyText = typeof result === 'string' ? result : (result?.content ?? '');
-        appendMessage(settings, conversationId, { role: 'assistant', content: replyText });
+        const parsed = parseReply(replyText);
+        if (parsed.messages.length === 0) {
+            throw new Error('The model did not return any usable content.');
+        }
+        for (const messageText of parsed.messages) {
+            appendMessage(settings, conversationId, { role: 'assistant', content: messageText, timestamp: genTimestamp() });
+        }
         rerenderIfStillViewing(conversationId, conversation.messages);
         context.saveSettingsDebounced();
     } catch (error) {
@@ -187,6 +198,57 @@ async function handleSend() {
         generatingConversationIds.delete(conversationId);
         refreshVisibleScreen();
     }
+}
+
+async function handleSend() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const input = document.getElementById('wp-input');
+    const userMessage = input.value.trim();
+    if (!userMessage || !currentConversationId) return;
+    // Captured now, not re-read after the generation await below — currentConversationId can
+    // change (or become null) while this function is awaiting, if the user navigates elsewhere.
+    const conversationId = currentConversationId;
+    if (generatingConversationIds.has(conversationId)) return;
+
+    const conversation = getConversation(settings, conversationId);
+    if (!conversation) return;
+
+    input.value = '';
+    appendMessage(settings, conversationId, { role: 'user', content: userMessage, timestamp: genTimestamp() });
+    editingMessageIndex = -1;
+    rerenderIfStillViewing(conversationId, conversation.messages);
+
+    await generateReply(conversationId, conversation, context, settings);
+}
+
+async function handleRegenerate() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    if (!currentConversationId) return;
+    const conversationId = currentConversationId;
+    if (generatingConversationIds.has(conversationId)) return;
+
+    const conversation = getConversation(settings, conversationId);
+    if (!conversation) return;
+
+    const discarded = discardTrailingReply(settings, conversationId);
+    if (!discarded) return;
+    editingMessageIndex = -1;
+    rerenderIfStillViewing(conversationId, conversation.messages);
+
+    await generateReply(conversationId, conversation, context, settings);
+}
+
+function toggleRegenerateMenu() {
+    const menu = document.getElementById('wp-regenerate-menu');
+    if (!menu) return;
+    menu.hidden = !menu.hidden;
+}
+
+function closeRegenerateMenu() {
+    const menu = document.getElementById('wp-regenerate-menu');
+    if (menu) menu.hidden = true;
 }
 
 function handleStartConversation(charName) {
@@ -231,6 +293,17 @@ function handleDeleteMessage(bubbleEl) {
 }
 
 function handleScreenBodyClick(event) {
+    const regenerateButton = event.target.closest('#wp-regenerate-button');
+    if (regenerateButton) {
+        if (!regenerateButton.disabled) toggleRegenerateMenu();
+        return;
+    }
+    const regenerateMenuItem = event.target.closest('.wp-popup-menu-item[data-action="regenerate"]');
+    if (regenerateMenuItem) {
+        closeRegenerateMenu();
+        handleRegenerate();
+        return;
+    }
     if (event.target.closest('#wp-send-button')) {
         handleSend();
         return;
@@ -312,6 +385,7 @@ function showScreen(view) {
     editingMessageIndex = -1;
     const isTyping = generatingConversationIds.has(currentConversationId);
     renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping);
+    updateRegenerateEnabled(conversation);
 }
 
 // SillyTavern's mobile CSS sets `body { position: fixed; overflow: hidden; }`, which breaks
@@ -377,6 +451,16 @@ function initPanel() {
     // tetheredMode is unchanged from milestone 1/2.
     document.getElementById('wp-tethered-checkbox').addEventListener('change', (event) => {
         tetheredMode = event.target.checked;
+    });
+
+    // Closes the Regenerate popup menu on any click outside it — the menu's own toggle/item
+    // clicks are handled inside handleScreenBodyClick above and are excluded here since they
+    // land inside #wp-regenerate-wrapper.
+    document.addEventListener('click', (event) => {
+        const menu = document.getElementById('wp-regenerate-menu');
+        if (!menu || menu.hidden) return;
+        if (event.target.closest('#wp-regenerate-wrapper')) return;
+        menu.hidden = true;
     });
 
     // Screen content is fully replaced on every navigation (see showScreen), so listeners are
