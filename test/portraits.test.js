@@ -34,3 +34,8 @@ test('buildPortraitMap deduplicates repeated char names without extra work', () 
 test('buildPortraitMap returns an empty map for an empty charNames list', () => {
     assert.deepEqual(buildPortraitMap([{ name: 'Rosa', avatar: 'rosa.png' }], [], fakeGetThumbnailUrl), {});
 });
+
+test('buildPortraitMap does not throw on an undefined charName and falls back to an empty initial', () => {
+    const map = buildPortraitMap([{ name: 'Rosa', avatar: 'rosa.png' }], [undefined], fakeGetThumbnailUrl);
+    assert.deepEqual(map[undefined], { avatarUrl: null, initial: '' });
+});
