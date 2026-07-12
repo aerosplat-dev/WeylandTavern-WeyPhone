@@ -46,3 +46,8 @@ test('parseReply skips an Incoming line whose message field is empty', () => {
     const raw = '<analysis>x</analysis>\nIncoming¦3:47 PM¦Rosa¦\nIncoming¦3:48 PM¦Rosa¦real message';
     assert.deepEqual(parseReply(raw), { messages: ['real message'], usedFallback: false });
 });
+
+test('parseReply normalizes CRLF line endings before matching Incoming lines', () => {
+    const raw = '<analysis>x</analysis>\r\nIncoming¦3:47 PM¦Rosa¦hey\r\nIncoming¦3:48 PM¦Rosa¦there';
+    assert.deepEqual(parseReply(raw), { messages: ['hey', 'there'], usedFallback: false });
+});
