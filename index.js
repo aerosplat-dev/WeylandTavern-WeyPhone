@@ -13,6 +13,7 @@ let currentView = 'home'; // 'home' | 'contacts' | 'conversation'
 let currentConversationId = null;
 let editingMessageIndex = -1;
 let tetheredMode = false;
+let isSending = false;
 
 // WeyPhone has no user-facing max-tokens setting yet (milestone 1), so this is a fixed default
 // passed to ConnectionManagerRequestService.sendRequest's required maxTokens argument. 1024 is
@@ -74,22 +75,38 @@ function rerenderConversationMessages() {
     renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex);
 }
 
+// Re-renders the conversation view for `conversationId` only if the panel is still showing
+// that exact conversation — the user may have navigated away (or deleted it) during the ~60s
+// generation wait below, in which case #wp-messages either doesn't exist or belongs to a
+// different conversation entirely.
+function rerenderIfStillViewing(conversationId, messages) {
+    if (currentView !== 'conversation' || currentConversationId !== conversationId) return;
+    const messagesEl = document.getElementById('wp-messages');
+    if (!messagesEl) return;
+    renderMessages(messagesEl, messages, editingMessageIndex);
+}
+
 async function handleSend() {
+    if (isSending) return;
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const input = document.getElementById('wp-input');
     const userMessage = input.value.trim();
     if (!userMessage || !currentConversationId) return;
+    // Captured now, not re-read after the generation await below — currentConversationId can
+    // change (or become null) while this function is awaiting, if the user navigates elsewhere.
+    const conversationId = currentConversationId;
     input.value = '';
 
-    const conversation = getConversation(settings, currentConversationId);
+    const conversation = getConversation(settings, conversationId);
     if (!conversation) return;
     const character = context.characters.find(c => c.name === conversation.charName);
     if (!character) return;
 
-    appendMessage(settings, currentConversationId, { role: 'user', content: userMessage });
+    isSending = true;
+    appendMessage(settings, conversationId, { role: 'user', content: userMessage });
     editingMessageIndex = -1;
-    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex);
+    rerenderIfStillViewing(conversationId, conversation.messages);
 
     try {
         const resolved = await resolveCharacterPrompt(context, character);
@@ -121,12 +138,14 @@ async function handleSend() {
         });
 
         const replyText = typeof result === 'string' ? result : (result?.content ?? '');
-        appendMessage(settings, currentConversationId, { role: 'assistant', content: replyText });
-        renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex);
+        appendMessage(settings, conversationId, { role: 'assistant', content: replyText });
+        rerenderIfStillViewing(conversationId, conversation.messages);
         context.saveSettingsDebounced();
     } catch (error) {
         console.error(`[${MODULE_NAME}] Generation failed:`, error);
         toastr.error(error.message, 'WeyPhone');
+    } finally {
+        isSending = false;
     }
 }
 
@@ -178,7 +197,6 @@ function handleScreenBodyClick(event) {
     }
     const deleteConvoBtn = event.target.closest('.wp-list-item-delete');
     if (deleteConvoBtn) {
-        event.stopPropagation();
         handleDeleteConversation(deleteConvoBtn.dataset.id);
         return;
     }
