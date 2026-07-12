@@ -4,8 +4,10 @@ import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonality
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteConversation, getAllConversationSummaries } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage } from './lib/generation.js';
-import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages } from './lib/panel.js';
+import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar } from './lib/panel.js';
 import { formatRelativeTime } from './lib/formatTime.js';
+import { withTypingState } from './lib/generationTracking.js';
+import { buildPortraitMap } from './lib/portraits.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
@@ -13,7 +15,9 @@ let currentView = 'home'; // 'home' | 'contacts' | 'conversation'
 let currentConversationId = null;
 let editingMessageIndex = -1;
 let tetheredMode = false;
-let isSending = false;
+// Replaces the single global `isSending` lock from milestone 2 — tracks in-flight generations
+// per conversation id, so sending in one conversation no longer blocks sending in another.
+const generatingConversationIds = new Set();
 
 // WeyPhone has no user-facing max-tokens setting yet (milestone 1), so this is a fixed default
 // passed to ConnectionManagerRequestService.sendRequest's required maxTokens argument. 1024 is
@@ -72,7 +76,8 @@ function rerenderConversationMessages() {
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, currentConversationId);
     if (!conversation) return;
-    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex);
+    const isTyping = generatingConversationIds.has(currentConversationId);
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping);
 }
 
 // Re-renders the conversation view for `conversationId` only if the panel is still showing
@@ -83,11 +88,39 @@ function rerenderIfStillViewing(conversationId, messages) {
     if (currentView !== 'conversation' || currentConversationId !== conversationId) return;
     const messagesEl = document.getElementById('wp-messages');
     if (!messagesEl) return;
-    renderMessages(messagesEl, messages, editingMessageIndex);
+    const isTyping = generatingConversationIds.has(conversationId);
+    renderMessages(messagesEl, messages, editingMessageIndex, isTyping);
+}
+
+// Shared by showScreen('home') and refreshVisibleScreen()'s home branch — builds the Home list's
+// typing-decorated summaries and charName->portrait map, then renders.
+function renderHomeScreenNow(context, settings) {
+    const screenBody = document.getElementById('wp-screen-body');
+    if (!screenBody) return;
+    const summaries = withTypingState(getAllConversationSummaries(settings), generatingConversationIds);
+    const charNames = summaries.map(summary => summary.charName);
+    const portraitMap = buildPortraitMap(context.characters, charNames, context.getThumbnailUrl);
+    renderHomeScreen(screenBody, summaries, formatRelativeTime, portraitMap);
+}
+
+// Re-renders whichever screen is currently visible, reflecting the latest generatingConversationIds
+// state — called whenever that set changes (a generation starts, finishes, or errors). This is how
+// a conversation's typing state updates live on the Home list even when a DIFFERENT conversation's
+// generation is the one that just started/finished, and how the Conversation view picks up its own
+// typing bubble without a full showScreen() reload.
+function refreshVisibleScreen() {
+    if (currentView === 'home') {
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        renderHomeScreenNow(context, settings);
+        return;
+    }
+    if (currentView === 'conversation' && currentConversationId) {
+        rerenderConversationMessages();
+    }
 }
 
 async function handleSend() {
-    if (isSending) return;
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const input = document.getElementById('wp-input');
@@ -96,6 +129,9 @@ async function handleSend() {
     // Captured now, not re-read after the generation await below — currentConversationId can
     // change (or become null) while this function is awaiting, if the user navigates elsewhere.
     const conversationId = currentConversationId;
+    // Per-conversation guard (was a single global `isSending` lock in milestone 2) — sending in a
+    // different conversation while this one is generating is now allowed, not blocked.
+    if (generatingConversationIds.has(conversationId)) return;
     input.value = '';
 
     const conversation = getConversation(settings, conversationId);
@@ -103,7 +139,8 @@ async function handleSend() {
     const character = context.characters.find(c => c.name === conversation.charName);
     if (!character) return;
 
-    isSending = true;
+    generatingConversationIds.add(conversationId);
+    refreshVisibleScreen();
     try {
         appendMessage(settings, conversationId, { role: 'user', content: userMessage });
         editingMessageIndex = -1;
@@ -145,7 +182,8 @@ async function handleSend() {
         console.error(`[${MODULE_NAME}] Generation failed:`, error);
         toastr.error(error.message, 'WeyPhone');
     } finally {
-        isSending = false;
+        generatingConversationIds.delete(conversationId);
+        refreshVisibleScreen();
     }
 }
 
@@ -245,14 +283,17 @@ function showScreen(view) {
 
     if (view === 'home') {
         title.textContent = 'Messages';
-        renderHomeScreen(screenBody, getAllConversationSummaries(settings), formatRelativeTime);
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
+        renderHomeScreenNow(context, settings);
         return;
     }
 
     if (view === 'contacts') {
         title.textContent = 'New Message';
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         const characters = getSelectableCharacters(context.characters, EXCLUDED_CHARACTER_NAMES);
-        renderContactsScreen(screenBody, characters);
+        const portraitMap = buildPortraitMap(context.characters, characters.map(c => c.name), context.getThumbnailUrl);
+        renderContactsScreen(screenBody, characters, portraitMap);
         return;
     }
 
@@ -263,9 +304,12 @@ function showScreen(view) {
         return;
     }
     title.textContent = conversation.charName;
+    const portraitMap = buildPortraitMap(context.characters, [conversation.charName], context.getThumbnailUrl);
+    renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[conversation.charName]);
     renderConversationScreen(screenBody);
     editingMessageIndex = -1;
-    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex);
+    const isTyping = generatingConversationIds.has(currentConversationId);
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping);
 }
 
 // SillyTavern's mobile CSS sets `body { position: fixed; overflow: hidden; }`, which breaks
@@ -327,6 +371,8 @@ function initPanel() {
     homeButton.addEventListener('click', () => showScreen('home'));
     composeButton.addEventListener('click', () => showScreen('contacts'));
 
+    // Markup/CSS-only restyle (toggle switch) — this listener and everything downstream of
+    // tetheredMode is unchanged from milestone 1/2.
     document.getElementById('wp-tethered-checkbox').addEventListener('change', (event) => {
         tetheredMode = event.target.checked;
     });
