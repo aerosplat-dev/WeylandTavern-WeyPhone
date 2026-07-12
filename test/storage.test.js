@@ -8,6 +8,7 @@ import {
     deleteMessage,
     deleteConversation,
     getAllConversationSummaries,
+    migrateLegacyConversations,
 } from '../lib/storage.js';
 
 test('createConversation creates a conversation with a generated id and empty messages', () => {
@@ -143,4 +144,44 @@ test('getAllConversationSummaries reports an empty snippet for a conversation wi
 test('getAllConversationSummaries returns an empty array when there are no conversations', () => {
     const settings = { conversations: {} };
     assert.deepEqual(getAllConversationSummaries(settings), []);
+});
+
+test('migrateLegacyConversations converts a charName-keyed entry with no id into the new shape', () => {
+    const settings = { conversations: { Rosa: { messages: [{ role: 'user', content: 'hi' }], lastActive: 123 } } };
+    migrateLegacyConversations(settings);
+    assert.equal(settings.conversations.Rosa, undefined);
+    const migrated = Object.values(settings.conversations)[0];
+    assert.equal(migrated.charName, 'Rosa');
+    assert.equal(typeof migrated.id, 'string');
+    assert.deepEqual(migrated.messages, [{ role: 'user', content: 'hi' }]);
+    assert.equal(migrated.lastActive, 123);
+    assert.equal(migrated.createdAt, 123);
+});
+
+test('migrateLegacyConversations leaves already-migrated (id-bearing) entries untouched', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Ava');
+    migrateLegacyConversations(settings);
+    assert.equal(Object.keys(settings.conversations).length, 1);
+    assert.equal(settings.conversations[conversation.id], conversation);
+});
+
+test('migrateLegacyConversations defaults missing lastActive/createdAt to a generated timestamp', () => {
+    const settings = { conversations: { Aiko: { messages: [] } } };
+    migrateLegacyConversations(settings);
+    const migrated = Object.values(settings.conversations)[0];
+    assert.equal(typeof migrated.lastActive, 'number');
+    assert.equal(migrated.createdAt, migrated.lastActive);
+});
+
+test('migrateLegacyConversations handles multiple legacy entries independently', () => {
+    const settings = {
+        conversations: {
+            Rosa: { messages: [], lastActive: 100 },
+            Kai: { messages: [], lastActive: 200 },
+        },
+    };
+    migrateLegacyConversations(settings);
+    const names = Object.values(settings.conversations).map(c => c.charName).sort();
+    assert.deepEqual(names, ['Kai', 'Rosa']);
 });

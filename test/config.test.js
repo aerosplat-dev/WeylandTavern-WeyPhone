@@ -15,12 +15,23 @@ test('getSettings creates the settings object on first call', () => {
 
 test('getSettings backfills newly-added default keys without clobbering existing values', () => {
     const extensionSettings = {
-        [MODULE_NAME]: { debug: true, conversations: { Rosa: { messages: ['x'], lastActive: 123 } } },
+        [MODULE_NAME]: { debug: true, conversations: {} },
     };
     const settings = getSettings(extensionSettings);
     assert.equal(settings.debug, true);
-    assert.deepEqual(settings.conversations.Rosa, { messages: ['x'], lastActive: 123 });
     assert.equal(settings.connectionProfileId, '');
+});
+
+test('getSettings migrates milestone-1-era conversations (keyed by charName, no id) into the current shape', () => {
+    const extensionSettings = {
+        [MODULE_NAME]: { debug: true, conversations: { Rosa: { messages: ['x'], lastActive: 123 } } },
+    };
+    const settings = getSettings(extensionSettings);
+    assert.equal(settings.conversations.Rosa, undefined);
+    const migrated = Object.values(settings.conversations)[0];
+    assert.equal(migrated.charName, 'Rosa');
+    assert.deepEqual(migrated.messages, ['x']);
+    assert.equal(migrated.lastActive, 123);
 });
 
 test('getSettings returns the same live object on repeated calls', () => {
