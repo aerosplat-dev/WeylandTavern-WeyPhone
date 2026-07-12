@@ -9,6 +9,7 @@ import {
     deleteConversation,
     getAllConversationSummaries,
     migrateLegacyConversations,
+    discardTrailingReply,
 } from '../lib/storage.js';
 
 test('createConversation creates a conversation with a generated id and empty messages', () => {
@@ -204,4 +205,44 @@ test('migrateLegacyConversations is idempotent across repeated calls', () => {
     migrateLegacyConversations(settings);
     const afterSecond = JSON.stringify(settings.conversations);
     assert.equal(afterSecond, afterFirst);
+});
+
+test('discardTrailingReply removes trailing assistant messages back to the last user message', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    appendMessage(settings, conversation.id, { role: 'user', content: 'hi' });
+    appendMessage(settings, conversation.id, { role: 'assistant', content: 'reply 1' });
+    appendMessage(settings, conversation.id, { role: 'assistant', content: 'reply 2' });
+    const result = discardTrailingReply(settings, conversation.id);
+    assert.equal(result, true);
+    assert.deepEqual(conversation.messages.map(m => m.content), ['hi']);
+});
+
+test('discardTrailingReply is a no-op and returns false when there is no trailing assistant run', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    appendMessage(settings, conversation.id, { role: 'user', content: 'hi' });
+    const result = discardTrailingReply(settings, conversation.id);
+    assert.equal(result, false);
+    assert.equal(conversation.messages.length, 1);
+});
+
+test('discardTrailingReply returns false for an empty conversation', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    assert.equal(discardTrailingReply(settings, conversation.id), false);
+});
+
+test('discardTrailingReply returns false when there is no user message before the trailing assistant run', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    appendMessage(settings, conversation.id, { role: 'assistant', content: 'unsolicited' });
+    const result = discardTrailingReply(settings, conversation.id);
+    assert.equal(result, false);
+    assert.equal(conversation.messages.length, 1);
+});
+
+test('discardTrailingReply returns false for an unknown conversation id', () => {
+    const settings = { conversations: {} };
+    assert.equal(discardTrailingReply(settings, 'nonexistent'), false);
 });
