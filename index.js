@@ -144,6 +144,11 @@ async function generateReply(conversationId, conversation, context, settings) {
         return;
     }
 
+    // generatingConversationIds.add()/refreshVisibleScreen() MUST stay inside this try block —
+    // placing them before `try` has leaked a permanently-stuck "generating" conversation twice
+    // before (milestone 2's final review, milestone 3's Task 4) whenever the pre-try code threw,
+    // since the finally below would never run to clean up the set. Keep the add/refresh as the
+    // first statements inside try, not above it.
     try {
         generatingConversationIds.add(conversationId);
         refreshVisibleScreen();
