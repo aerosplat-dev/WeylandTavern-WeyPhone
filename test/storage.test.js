@@ -10,6 +10,14 @@ import {
     getAllConversationSummaries,
     migrateLegacyConversations,
     discardTrailingReply,
+    createMemory,
+    editMemory,
+    deleteMemory,
+    setMemoryPinned,
+    getPinnedMemories,
+    setMemorySettings,
+    countExchangesSince,
+    migrateMemoryFields,
 } from '../lib/storage.js';
 
 test('createConversation creates a conversation with a generated id and empty messages', () => {
@@ -157,6 +165,140 @@ test('migrateLegacyConversations converts a charName-keyed entry with no id into
     assert.deepEqual(migrated.messages, [{ role: 'user', content: 'hi' }]);
     assert.equal(migrated.lastActive, 123);
     assert.equal(migrated.createdAt, 123);
+});
+
+test('createConversation sets default memory fields on a new conversation', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    assert.deepEqual(conversation.memories, []);
+    assert.equal(conversation.memoryThreshold, 100);
+    assert.equal(conversation.memoryConnectionProfileId, '');
+    assert.equal(conversation.lastMemoryMessageIndex, 0);
+});
+
+test('createMemory adds a pinned-by-default memory and returns it', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    const memory = createMemory(settings, conversation.id, 'They met at a party.');
+    assert.equal(memory.content, 'They met at a party.');
+    assert.equal(memory.pinned, true);
+    assert.equal(memory.sourceRange, null);
+    assert.equal(typeof memory.id, 'string');
+    assert.equal(typeof memory.createdAt, 'number');
+    assert.deepEqual(conversation.memories, [memory]);
+});
+
+test('createMemory accepts pinned:false and a sourceRange override', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    const memory = createMemory(settings, conversation.id, 'text', { pinned: false, sourceRange: { from: 0, to: 5 } });
+    assert.equal(memory.pinned, false);
+    assert.deepEqual(memory.sourceRange, { from: 0, to: 5 });
+});
+
+test('createMemory returns undefined for an unknown conversation id', () => {
+    const settings = { conversations: {} };
+    assert.equal(createMemory(settings, 'nonexistent', 'text'), undefined);
+});
+
+test('editMemory updates a memory\'s content in place', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    const memory = createMemory(settings, conversation.id, 'original');
+    editMemory(settings, conversation.id, memory.id, 'edited');
+    assert.equal(conversation.memories[0].content, 'edited');
+});
+
+test('editMemory is a no-op for an unknown memory id', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    createMemory(settings, conversation.id, 'original');
+    editMemory(settings, conversation.id, 'nonexistent', 'edited');
+    assert.equal(conversation.memories[0].content, 'original');
+});
+
+test('deleteMemory removes the memory by id', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    const memory = createMemory(settings, conversation.id, 'text');
+    deleteMemory(settings, conversation.id, memory.id);
+    assert.deepEqual(conversation.memories, []);
+});
+
+test('deleteMemory is a no-op for an unknown memory id', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    createMemory(settings, conversation.id, 'text');
+    deleteMemory(settings, conversation.id, 'nonexistent');
+    assert.equal(conversation.memories.length, 1);
+});
+
+test('setMemoryPinned toggles a memory\'s pinned state', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    const memory = createMemory(settings, conversation.id, 'text');
+    setMemoryPinned(settings, conversation.id, memory.id, false);
+    assert.equal(conversation.memories[0].pinned, false);
+    setMemoryPinned(settings, conversation.id, memory.id, true);
+    assert.equal(conversation.memories[0].pinned, true);
+});
+
+test('getPinnedMemories returns only pinned memories', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    const a = createMemory(settings, conversation.id, 'pinned one');
+    const b = createMemory(settings, conversation.id, 'unpinned one', { pinned: false });
+    const result = getPinnedMemories(settings, conversation.id);
+    assert.deepEqual(result, [a]);
+});
+
+test('getPinnedMemories returns an empty array for an unknown conversation id', () => {
+    const settings = { conversations: {} };
+    assert.deepEqual(getPinnedMemories(settings, 'nonexistent'), []);
+});
+
+test('setMemorySettings partially updates only the provided fields', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    setMemorySettings(settings, conversation.id, { memoryThreshold: 50 });
+    assert.equal(conversation.memoryThreshold, 50);
+    assert.equal(conversation.memoryConnectionProfileId, '');
+    setMemorySettings(settings, conversation.id, { memoryConnectionProfileId: 'profile-1' });
+    assert.equal(conversation.memoryThreshold, 50);
+    assert.equal(conversation.memoryConnectionProfileId, 'profile-1');
+});
+
+test('countExchangesSince counts only role:user entries from the given index onward', () => {
+    const messages = [
+        { role: 'user', content: 'a' },
+        { role: 'assistant', content: 'b' },
+        { role: 'assistant', content: 'c' },
+        { role: 'user', content: 'd' },
+        { role: 'assistant', content: 'e' },
+    ];
+    assert.equal(countExchangesSince(messages, 0), 2);
+    assert.equal(countExchangesSince(messages, 3), 1);
+    assert.equal(countExchangesSince(messages, 5), 0);
+});
+
+test('migrateMemoryFields backfills missing memory fields on a pre-milestone-5 conversation', () => {
+    const settings = { conversations: { conv_1: { id: 'conv_1', charName: 'Rosa', messages: [], createdAt: 1, lastActive: 1 } } };
+    migrateMemoryFields(settings);
+    const conversation = settings.conversations.conv_1;
+    assert.deepEqual(conversation.memories, []);
+    assert.equal(conversation.memoryThreshold, 100);
+    assert.equal(conversation.memoryConnectionProfileId, '');
+    assert.equal(conversation.lastMemoryMessageIndex, 0);
+});
+
+test('migrateMemoryFields does not overwrite existing memory data', () => {
+    const settings = { conversations: { conv_1: { id: 'conv_1', charName: 'Rosa', messages: [], createdAt: 1, lastActive: 1, memories: [{ id: 'mem_1', content: 'x', createdAt: 1, pinned: true, sourceRange: null }], memoryThreshold: 25, memoryConnectionProfileId: 'p', lastMemoryMessageIndex: 3 } } };
+    migrateMemoryFields(settings);
+    const conversation = settings.conversations.conv_1;
+    assert.equal(conversation.memories.length, 1);
+    assert.equal(conversation.memoryThreshold, 25);
+    assert.equal(conversation.memoryConnectionProfileId, 'p');
+    assert.equal(conversation.lastMemoryMessageIndex, 3);
 });
 
 test('migrateLegacyConversations leaves already-migrated (id-bearing) entries untouched', () => {

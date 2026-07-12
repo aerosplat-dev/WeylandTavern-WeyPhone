@@ -41,3 +41,13 @@ test('getSettings returns the same live object on repeated calls', () => {
     const second = getSettings(extensionSettings);
     assert.equal(second.debug, true);
 });
+
+test('getSettings backfills memory fields on a pre-milestone-5 conversation', () => {
+    const extensionSettings = {
+        [MODULE_NAME]: { conversations: { conv_1: { id: 'conv_1', charName: 'Rosa', messages: [], createdAt: 1, lastActive: 1 } } },
+    };
+    const settings = getSettings(extensionSettings);
+    const conversation = settings.conversations.conv_1;
+    assert.deepEqual(conversation.memories, []);
+    assert.equal(conversation.memoryThreshold, 100);
+});
