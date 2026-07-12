@@ -510,6 +510,15 @@
     flex: 0 0 auto;
 }
 
+/* .wp-header-btn defaults to display:none (see the base rule above) so header buttons stay
+   hidden until a data-view-scoped rule shows them per screen. #wp-regenerate-button only ever
+   exists in the DOM while renderConversationScreen has rendered it (the conversation view), so
+   it needs no data-view scoping of its own — just an unconditional override of the display:none
+   default, since its very presence already implies the conversation view is active. */
+#wp-regenerate-button {
+    display: flex;
+}
+
 #wp-regenerate-menu {
     position: absolute;
     bottom: calc(100% + 6px);
