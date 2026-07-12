@@ -104,11 +104,11 @@ async function handleSend() {
     if (!character) return;
 
     isSending = true;
-    appendMessage(settings, conversationId, { role: 'user', content: userMessage });
-    editingMessageIndex = -1;
-    rerenderIfStillViewing(conversationId, conversation.messages);
-
     try {
+        appendMessage(settings, conversationId, { role: 'user', content: userMessage });
+        editingMessageIndex = -1;
+        rerenderIfStillViewing(conversationId, conversation.messages);
+
         const resolved = await resolveCharacterPrompt(context, character);
         const historyForScan = conversation.messages.slice(0, -1);
         const worldInfo = await resolveWorldInfo(context, historyForScan);
