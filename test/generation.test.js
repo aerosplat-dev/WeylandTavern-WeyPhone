@@ -60,6 +60,9 @@ test('buildMessages coalesces 3 consecutive assistant history entries into one n
 });
 
 test('buildMessages coalesces 2 consecutive user history entries (dangling-user-turn scenario)', () => {
+    // The trailing userMessage also coalesces into the boundary: since the last (coalesced)
+    // history entry is role:'user', userMessage merges into it rather than becoming a fourth,
+    // adjacent role:'user' message.
     const result = buildMessages({
         systemPromptText: 'SYSTEM',
         history: [
@@ -72,8 +75,7 @@ test('buildMessages coalesces 2 consecutive user history entries (dangling-user-
     assert.deepEqual(result, [
         { role: 'system', content: 'SYSTEM' },
         { role: 'assistant', content: 'earlier reply' },
-        { role: 'user', content: 'first attempt\nretry after failed generation' },
-        { role: 'user', content: 'new message' },
+        { role: 'user', content: 'first attempt\nretry after failed generation\nnew message' },
     ]);
 });
 
@@ -98,10 +100,10 @@ test('buildMessages leaves strictly-alternating history unaffected (one message 
     ]);
 });
 
-test('buildMessages coalescing does not touch the leading system message or the trailing userMessage', () => {
-    // Leading system message must never merge with a same-role-looking history entry, and the
-    // trailing userMessage is always its own final message even if the last history entry is
-    // also role:'user' (coalescing only applies within `history` itself).
+test('buildMessages coalescing does not touch the leading system message, but does coalesce into the trailing userMessage when the boundary role matches', () => {
+    // Leading system message must never merge with a same-role-looking history entry. The
+    // trailing userMessage DOES merge into the last history message when that message is also
+    // role:'user' (the history/userMessage boundary is coalesced too, not just within history).
     const result = buildMessages({
         systemPromptText: 'SYSTEM',
         history: [
@@ -113,11 +115,29 @@ test('buildMessages coalescing does not touch the leading system message or the 
     assert.deepEqual(result, [
         { role: 'system', content: 'SYSTEM' },
         { role: 'assistant', content: 'x' },
-        { role: 'user', content: 'y' },
-        { role: 'user', content: 'z' },
+        { role: 'user', content: 'y\nz' },
     ]);
     assert.equal(result[0].role, 'system');
-    assert.equal(result.length, 4);
+    assert.equal(result.length, 3);
+});
+
+test('buildMessages does not merge the trailing userMessage when history ends on role:assistant', () => {
+    // Guards against an overly-aggressive fix: alternating history ending in 'assistant' should
+    // still produce a separate final 'user' message, not merge into the assistant entry.
+    const result = buildMessages({
+        systemPromptText: 'SYSTEM',
+        history: [
+            { role: 'user', content: 'a' },
+            { role: 'assistant', content: 'b' },
+        ],
+        userMessage: 'c',
+    });
+    assert.deepEqual(result, [
+        { role: 'system', content: 'SYSTEM' },
+        { role: 'user', content: 'a' },
+        { role: 'assistant', content: 'b' },
+        { role: 'user', content: 'c' },
+    ]);
 });
 
 test('resolveProfileId prefers the WeyPhone override when set', () => {
