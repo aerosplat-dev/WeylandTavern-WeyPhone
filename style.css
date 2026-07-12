@@ -90,6 +90,13 @@
     flex: 0 0 auto;
 }
 
+.wp-header-btn.wp-disabled,
+.wp-header-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+}
+
 /* Each header button only makes sense on specific screens — driven by #wp-panel's data-view
    attribute (set by index.js on every navigation) rather than scattering visibility toggling
    through JS. */
@@ -496,4 +503,39 @@
     .wp-typing-dot {
         animation: none;
     }
+}
+
+#wp-regenerate-wrapper {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+#wp-regenerate-menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    min-width: 120px;
+    background: var(--SmartThemeBlurTintColor, #1e1e1e);
+    border: 1px solid var(--SmartThemeBorderColor, #333);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    z-index: 1;
+}
+
+.wp-popup-menu-item {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    color: var(--SmartThemeBodyColor, #fff);
+    font-family: var(--mainFontFamily, "Noto Sans", sans-serif);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.wp-popup-menu-item:hover {
+    background: var(--SmartThemeChatTintColor, #2a2a2a);
 }
