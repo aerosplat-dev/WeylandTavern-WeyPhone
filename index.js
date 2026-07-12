@@ -144,9 +144,9 @@ async function generateReply(conversationId, conversation, context, settings) {
         return;
     }
 
-    generatingConversationIds.add(conversationId);
-    refreshVisibleScreen();
     try {
+        generatingConversationIds.add(conversationId);
+        refreshVisibleScreen();
         const resolved = await resolveCharacterPrompt(context, character);
         const historyForScan = conversation.messages.slice(0, -1);
         const worldInfo = await resolveWorldInfo(context, historyForScan);
