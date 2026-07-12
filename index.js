@@ -76,8 +76,10 @@ function rerenderConversationMessages() {
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, currentConversationId);
     if (!conversation) return;
+    const messagesEl = document.getElementById('wp-messages');
+    if (!messagesEl) return;
     const isTyping = generatingConversationIds.has(currentConversationId);
-    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping);
+    renderMessages(messagesEl, conversation.messages, editingMessageIndex, isTyping);
 }
 
 // Re-renders the conversation view for `conversationId` only if the panel is still showing
@@ -139,9 +141,9 @@ async function handleSend() {
     const character = context.characters.find(c => c.name === conversation.charName);
     if (!character) return;
 
-    generatingConversationIds.add(conversationId);
-    refreshVisibleScreen();
     try {
+        generatingConversationIds.add(conversationId);
+        refreshVisibleScreen();
         appendMessage(settings, conversationId, { role: 'user', content: userMessage });
         editingMessageIndex = -1;
         rerenderIfStillViewing(conversationId, conversation.messages);
