@@ -64,6 +64,55 @@
     gap: 8px;
 }
 
+#wp-panel-title {
+    flex: 1;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--SmartThemeBodyColor, #fff);
+}
+
+.wp-header-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--SmartThemeBodyColor, #fff);
+    cursor: pointer;
+    font-size: 15px;
+    flex: 0 0 auto;
+}
+
+/* Each header button only makes sense on specific screens — driven by #wp-panel's data-view
+   attribute (set by index.js on every navigation) rather than scattering visibility toggling
+   through JS. */
+#wp-panel[data-view="conversation"] #wp-home-button,
+#wp-panel[data-view="contacts"] #wp-home-button {
+    display: flex;
+}
+
+#wp-panel[data-view="home"] #wp-compose-button {
+    display: flex;
+}
+
+#wp-mode-toggle {
+    display: none;
+}
+
+#wp-panel[data-view="conversation"] #wp-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--SmartThemeBodyColor, #fff);
+    flex: 0 0 auto;
+}
+
 /* Always-reachable close affordance, independent of the toggle button —
    on narrow/mobile viewports the panel goes full-screen (below) and can
    visually cover the toggle button, so closing must not depend on it. */
@@ -118,6 +167,93 @@
     }
 }
 
+#wp-screen-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 8px;
+    gap: 8px;
+}
+
+/* Conversation view delegates its own scrolling to #wp-messages (below) instead of scrolling
+   the whole screen body, so the input row can stay pinned at the bottom. */
+#wp-panel[data-view="conversation"] #wp-screen-body {
+    overflow: hidden;
+    padding: 0;
+    gap: 0;
+}
+
+.wp-empty-state {
+    text-align: center;
+    color: var(--SmartThemeBodyColor, #888);
+    opacity: 0.6;
+    padding: 24px 12px;
+    font-size: 13px;
+}
+
+.wp-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--SmartThemeChatTintColor, #2a2a2a);
+    cursor: pointer;
+}
+
+.wp-list-item-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.wp-list-item-title {
+    font-weight: 600;
+    color: var(--SmartThemeBodyColor, #fff);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wp-list-item-snippet {
+    font-size: 12px;
+    color: var(--SmartThemeBodyColor, #aaa);
+    opacity: 0.75;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wp-list-item-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.wp-list-item-time {
+    font-size: 11px;
+    color: var(--SmartThemeBodyColor, #888);
+    opacity: 0.6;
+    white-space: nowrap;
+}
+
+.wp-list-item-delete {
+    background: none;
+    border: none;
+    color: var(--SmartThemeBodyColor, #888);
+    opacity: 0.6;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px;
+}
+
+.wp-list-item-delete:hover {
+    opacity: 1;
+}
+
 #wp-messages {
     flex: 1;
     overflow-y: auto;
@@ -132,6 +268,71 @@
     padding: 6px 10px;
     border-radius: 12px;
     word-wrap: break-word;
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.wp-message-text {
+    flex: 1;
+    min-width: 0;
+    word-wrap: break-word;
+}
+
+.wp-message-edit-btn {
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.5;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0;
+    flex: 0 0 auto;
+}
+
+.wp-message-edit-btn:hover {
+    opacity: 1;
+}
+
+.wp-message-editing {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 90%;
+}
+
+.wp-message-edit-textarea {
+    width: 100%;
+    min-height: 48px;
+    resize: vertical;
+    background: var(--SmartThemeBlurTintColor, #1a1a1a);
+    color: var(--SmartThemeBodyColor, #fff);
+    border: 1px solid var(--SmartThemeBorderColor, #333);
+    border-radius: 6px;
+    padding: 6px;
+    font-family: inherit;
+    font-size: inherit;
+    box-sizing: border-box;
+}
+
+.wp-message-edit-controls {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.wp-message-edit-controls button {
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.75;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+}
+
+.wp-message-edit-controls button:hover {
+    opacity: 1;
 }
 
 .wp-message.wp-user {
