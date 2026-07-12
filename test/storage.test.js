@@ -185,3 +185,23 @@ test('migrateLegacyConversations handles multiple legacy entries independently',
     const names = Object.values(settings.conversations).map(c => c.charName).sort();
     assert.deepEqual(names, ['Kai', 'Rosa']);
 });
+
+test('migrateLegacyConversations leaves a modern entry untouched while migrating a legacy one alongside it', () => {
+    const settings = { conversations: {} };
+    const modern = createConversation(settings, 'Ava');
+    settings.conversations.Rosa = { messages: [], lastActive: 100 };
+    migrateLegacyConversations(settings);
+    assert.equal(settings.conversations[modern.id], modern);
+    assert.equal(settings.conversations.Rosa, undefined);
+    const migratedNames = Object.values(settings.conversations).map(c => c.charName).sort();
+    assert.deepEqual(migratedNames, ['Ava', 'Rosa']);
+});
+
+test('migrateLegacyConversations is idempotent across repeated calls', () => {
+    const settings = { conversations: { Rosa: { messages: [{ role: 'user', content: 'hi' }], lastActive: 100 } } };
+    migrateLegacyConversations(settings);
+    const afterFirst = JSON.stringify(settings.conversations);
+    migrateLegacyConversations(settings);
+    const afterSecond = JSON.stringify(settings.conversations);
+    assert.equal(afterSecond, afterFirst);
+});
