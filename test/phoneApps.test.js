@@ -40,3 +40,9 @@ test('setPhoneAppContent overwrites a previous cache entry for the same chatId/a
     setPhoneAppContent(settings, 'chat_1', 'chronicle', { content: 'new', generatedAt: 2 });
     assert.deepEqual(getPhoneAppContent(settings, 'chat_1', 'chronicle'), { content: 'new', generatedAt: 2 });
 });
+
+test('setPhoneAppContent/getPhoneAppContent round-trip chatMessageCountAtGeneration', () => {
+    const settings = { phoneApps: {} };
+    setPhoneAppContent(settings, 'chat_1', 'chronicle', { content: 'x', generatedAt: 1, chatMessageCountAtGeneration: 42 });
+    assert.equal(getPhoneAppContent(settings, 'chat_1', 'chronicle').chatMessageCountAtGeneration, 42);
+});
