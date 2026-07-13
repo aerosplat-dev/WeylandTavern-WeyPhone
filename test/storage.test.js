@@ -21,6 +21,8 @@ import {
     migrateMemoryFields,
     getMemoryWindow,
     getLastGeneratedMemory,
+    migrateTetheredFields,
+    setTetheredSettings,
     DEFAULT_MEMORY_PRIMARY_MODEL,
     DEFAULT_MEMORY_BACKUP_MODEL,
 } from '../lib/storage.js';
@@ -487,4 +489,51 @@ test('getLastGeneratedMemory returns null when there are no auto-generated memor
 
 test('getLastGeneratedMemory returns null for a conversation with no memories', () => {
     assert.equal(getLastGeneratedMemory({ memories: [] }), null);
+});
+
+test('createConversation sets default tethered fields on a new conversation', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    assert.equal(conversation.tethered, false);
+    assert.equal(conversation.tetheredHistoryCap, null);
+});
+
+test('setTetheredSettings partially updates only the provided fields', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    setTetheredSettings(settings, conversation.id, { tethered: true });
+    assert.equal(conversation.tethered, true);
+    assert.equal(conversation.tetheredHistoryCap, null);
+    setTetheredSettings(settings, conversation.id, { tetheredHistoryCap: 25 });
+    assert.equal(conversation.tethered, true);
+    assert.equal(conversation.tetheredHistoryCap, 25);
+});
+
+test('setTetheredSettings can explicitly clear tetheredHistoryCap back to null', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    setTetheredSettings(settings, conversation.id, { tetheredHistoryCap: 25 });
+    setTetheredSettings(settings, conversation.id, { tetheredHistoryCap: null });
+    assert.equal(conversation.tetheredHistoryCap, null);
+});
+
+test('setTetheredSettings returns undefined for an unknown conversation id', () => {
+    const settings = { conversations: {} };
+    assert.equal(setTetheredSettings(settings, 'nonexistent', { tethered: true }), undefined);
+});
+
+test('migrateTetheredFields backfills missing tethered fields on a pre-milestone-6 conversation', () => {
+    const settings = { conversations: { conv_1: { id: 'conv_1', charName: 'Rosa', messages: [], createdAt: 1, lastActive: 1 } } };
+    migrateTetheredFields(settings);
+    const conversation = settings.conversations.conv_1;
+    assert.equal(conversation.tethered, false);
+    assert.equal(conversation.tetheredHistoryCap, null);
+});
+
+test('migrateTetheredFields does not overwrite existing tethered data', () => {
+    const settings = { conversations: { conv_1: { id: 'conv_1', charName: 'Rosa', messages: [], createdAt: 1, lastActive: 1, tethered: true, tetheredHistoryCap: 40 } } };
+    migrateTetheredFields(settings);
+    const conversation = settings.conversations.conv_1;
+    assert.equal(conversation.tethered, true);
+    assert.equal(conversation.tetheredHistoryCap, 40);
 });
