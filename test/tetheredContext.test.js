@@ -6,6 +6,7 @@ import {
     resolveMainHistorySlice,
     formatMainHistoryTranscript,
     buildTetheredViewBlock,
+    convertMainChatToMessages,
 } from '../lib/tetheredContext.js';
 
 test('isMainRoleplayActive is true when a solo character is selected', () => {
@@ -157,4 +158,44 @@ test('buildTetheredViewBlock omits a section entirely when its input is empty', 
 test('buildTetheredViewBlock returns an empty string when all three sections are empty', () => {
     const result = buildTetheredViewBlock({ worldInfoText: '', ltmEntries: [], historyTranscript: '' });
     assert.equal(result, '');
+});
+
+test('convertMainChatToMessages converts is_user/mes pairs to role/content pairs', () => {
+    const chat = [
+        { is_user: true, mes: 'hello', name: 'Ava' },
+        { is_user: false, mes: 'hi there', name: 'Rosa' },
+    ];
+    assert.deepEqual(convertMainChatToMessages(chat), [
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: 'hi there' },
+    ]);
+});
+
+test('convertMainChatToMessages skips is_system messages', () => {
+    const chat = [
+        { is_user: false, is_system: true, mes: 'a system note', name: 'System' },
+        { is_user: true, mes: 'real message', name: 'Ava' },
+    ];
+    assert.deepEqual(convertMainChatToMessages(chat), [{ role: 'user', content: 'real message' }]);
+});
+
+test('convertMainChatToMessages skips empty/whitespace-only messages', () => {
+    const chat = [
+        { is_user: true, mes: '   ', name: 'Ava' },
+        { is_user: false, mes: 'real reply', name: 'Rosa' },
+    ];
+    assert.deepEqual(convertMainChatToMessages(chat), [{ role: 'assistant', content: 'real reply' }]);
+});
+
+test('convertMainChatToMessages returns [] for an empty or missing chat', () => {
+    assert.deepEqual(convertMainChatToMessages([]), []);
+    assert.deepEqual(convertMainChatToMessages(undefined), []);
+});
+
+test('convertMainChatToMessages never mutates the input array', () => {
+    const chat = [{ is_user: true, mes: 'hello', name: 'Ava' }];
+    const original = [...chat];
+    convertMainChatToMessages(chat);
+    assert.deepEqual(chat, original);
+    assert.equal(chat.length, 1);
 });

@@ -11,7 +11,7 @@ import { buildPortraitMap } from './lib/portraits.js';
 import { parseReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
-import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock } from './lib/tetheredContext.js';
+import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages } from './lib/tetheredContext.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
@@ -109,9 +109,7 @@ async function buildTetheredContext(context, conversation) {
 // the real getWorldInfoPrompt engine, but scanned it against the wrong conversation.
 async function resolveWorldInfoTetheredForMainChat(context) {
     try {
-        const mainHistory = (context.chat || [])
-            .filter(m => !m.is_system && typeof m.mes === 'string' && m.mes.trim())
-            .map(m => ({ role: m.is_user ? 'user' : 'assistant', content: m.mes }));
+        const mainHistory = convertMainChatToMessages(context.chat);
         const result = await resolveWorldInfoTethered({
             getWorldInfoPrompt: context.getWorldInfoPrompt,
             history: mainHistory,
