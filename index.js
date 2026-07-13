@@ -84,7 +84,6 @@ async function buildTetheredContext(context, conversation) {
     if (!conversation.tethered) return '';
     if (!isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId })) return '';
 
-    const mainCharacter = context.characters[context.characterId];
     const worldInfo = await resolveWorldInfoTetheredForMainChat(context);
 
     const ltmSettings = context.extensionSettings['Weyland-LTM'];
@@ -223,6 +222,8 @@ function rerenderMemoryScreen() {
         isGenerating,
         canGenerateNow: hasPendingExchanges,
         canRegenerateLast: hasGeneratedMemory,
+        tethered: conversation.tethered,
+        tetheredHistoryCap: conversation.tetheredHistoryCap,
     });
     const profiles = context.ConnectionManagerRequestService.getSupportedProfiles();
     populateConnectionProfileOptions(document.getElementById('wp-memory-profile-select'), profiles, conversation.memoryConnectionProfileId || '');
@@ -738,6 +739,7 @@ function handleScreenBodyClick(event) {
 const MEMORY_SETTINGS_FIELD_IDS = [
     'wp-memory-profile-select', 'wp-memory-threshold-input',
     'wp-memory-primary-model-input', 'wp-memory-backup-model-input',
+    'wp-tethered-full-history-checkbox', 'wp-tethered-history-cap-input',
 ];
 
 function handleScreenBodyChange(event) {
@@ -755,6 +757,13 @@ function handleScreenBodyChange(event) {
         memoryPrimaryModel: primaryModel,
         memoryBackupModel: backupModel,
     });
+
+    const useFullHistory = document.getElementById('wp-tethered-full-history-checkbox').checked;
+    const historyCapInput = document.getElementById('wp-tethered-history-cap-input');
+    historyCapInput.disabled = useFullHistory;
+    const tetheredHistoryCap = useFullHistory ? null : (Number(historyCapInput.value) || 1);
+    setTetheredSettings(settings, currentConversationId, { tetheredHistoryCap });
+
     context.saveSettingsDebounced();
 }
 
