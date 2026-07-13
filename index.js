@@ -15,12 +15,15 @@ import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySl
 import { PHONE_APP_PROMPTS } from './lib/phoneAppPrompts.js';
 import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
 import { parsePhoneAppOutput } from './lib/phoneAppFormatting.js';
+import { WEYLAND_ROSTER } from './lib/weylandRoster.js';
+import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
 let currentView = 'home'; // 'home' | 'contacts' | 'conversation' | 'memory'
 let currentConversationId = null;
 let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
+let currentTwitterProfileCharacter = null;
 const PHONE_APP_LABELS = { chronicle: 'The Chronicle', discord: 'Discord', yikyak: 'Yik Yak' };
 const phoneAppGeneratingIds = new Set(); // tracks which app keys currently have a generation in flight
 const DEFAULT_PHONE_APP_MAX_TOKENS = 1024;
@@ -332,6 +335,157 @@ function rerenderPhoneAppScreenIfVisible(appKey) {
         isGenerating: phoneAppGeneratingIds.has(appKey),
         formatRelativeTime,
     });
+}
+
+// Composite cache keys for Twitter — lib/phoneApps.js's getPhoneAppContent/setPhoneAppContent
+// already take an opaque appKey string, so 'twitter' (feed) and 'twitter:profile:<Name>' (one
+// per character) work with zero changes to that module. Each caches/goes-stale independently.
+function twitterCacheKey(mode, characterName) {
+    return mode === 'feed' ? 'twitter' : `twitter:profile:${characterName}`;
+}
+
+const twitterGeneratingKeys = new Set();
+
+/**
+ * Twitter's equivalent of runPhoneAppGeneration, generalized for its two modes (main feed, or one
+ * character's profile). Same read-only mechanism, same never-mutates-context.chat guarantee —
+ * this function's only new piece versus runPhoneAppGeneration is building the prompt dynamically
+ * via buildTwitterPrompt instead of a static PHONE_APP_PROMPTS[appKey] lookup, and using a
+ * composite cache key. Every context.chat access below is a READ ONLY — verify this explicitly in
+ * review, matching the standing invariant.
+ * @param {'feed' | 'profile'} mode
+ * @param {string} [characterName] required when mode === 'profile'
+ */
+async function runTwitterGeneration(mode, characterName) {
+    const cacheKey = twitterCacheKey(mode, characterName);
+    if (twitterGeneratingKeys.has(cacheKey)) return;
+    const context = SillyTavern.getContext();
+    if (!isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId })) {
+        toastr.info('No active roleplay to pull content from right now.', 'WeyPhone');
+        return;
+    }
+
+    try {
+        twitterGeneratingKeys.add(cacheKey);
+        rerenderTwitterScreenIfVisible(mode, characterName);
+
+        const settings = getSettings(context.extensionSettings);
+        const mainCharacter = context.characters[context.characterId];
+        if (!mainCharacter) {
+            toastr.info('No active roleplay to pull content from right now.', 'WeyPhone');
+            return;
+        }
+
+        let promptText;
+        if (mode === 'profile') {
+            const rosterEntry = WEYLAND_ROSTER.find(c => c.name === characterName);
+            if (!rosterEntry) {
+                toastr.error(`No roster entry found for "${characterName}".`, 'WeyPhone');
+                return;
+            }
+            promptText = buildTwitterPrompt({ mode: 'profile', character: rosterEntry });
+        } else {
+            promptText = buildTwitterPrompt({ mode: 'feed' });
+        }
+
+        const resolved = await resolveCharacterPrompt(context, mainCharacter);
+        const worldInfoAfter = await resolveWorldInfoTetheredForMainChat(context, promptText);
+        const mainHistory = convertMainChatToMessages(context.chat);
+
+        const systemPromptText = buildSystemPrompt({
+            systemPrompt: resolved.systemPrompt,
+            worldInfoBefore: '',
+            descriptionText: resolved.descriptionText,
+            personalityText: resolved.personalityText,
+            scenarioText: '',
+            worldInfoAfter,
+        });
+
+        const messages = buildMessages({
+            systemPromptText,
+            history: mainHistory,
+            userMessage: promptText,
+        });
+
+        const userName = context.name1 || 'User';
+        messages[0].content = applyMacroSubstitution({
+            substituteParams: context.substituteParams,
+            content: messages[0].content,
+            userName,
+            charName: mainCharacter.name,
+        });
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage !== messages[0]) {
+            lastMessage.content = applyMacroSubstitution({
+                substituteParams: context.substituteParams,
+                content: lastMessage.content,
+                userName,
+                charName: mainCharacter.name,
+            });
+        }
+
+        const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
+        const profileId = resolveProfileId(settings, activeProfileId);
+        const result = await sendMessage({
+            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_PHONE_APP_MAX_TOKENS),
+            profileId,
+            messages,
+        });
+
+        const rawText = typeof result === 'string' ? result : (result?.content ?? '');
+        const parsed = parsePhoneAppOutput(rawText);
+        if (parsed.sections.length === 0) {
+            toastr.warning('The model did not return usable content this time.', 'WeyPhone');
+            return;
+        }
+
+        setPhoneAppContent(settings, context.chatId, cacheKey, {
+            content: parsed,
+            generatedAt: Date.now(),
+            chatMessageCountAtGeneration: context.chat.length,
+        });
+        context.saveSettingsDebounced();
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Twitter generation failed:`, error);
+        toastr.error(error.message, 'WeyPhone');
+    } finally {
+        twitterGeneratingKeys.delete(cacheKey);
+        rerenderTwitterScreenIfVisible(mode, characterName);
+    }
+}
+
+// NOTE: renderTwitterProfileScreen is added to the lib/panel.js import by Task 5. Until that
+// lands, the 'profile' branch below is a valid-syntax forward reference that will throw at
+// runtime if actually exercised — expected per this task's brief, not a bug to work around here.
+function rerenderTwitterScreenIfVisible(mode, characterName) {
+    const expectedView = mode === 'feed' ? 'twitter-feed' : 'twitter-profile';
+    if (currentView !== expectedView) return;
+    if (mode === 'profile' && currentTwitterProfileCharacter !== characterName) return;
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const screenBody = document.getElementById('wp-screen-body');
+    if (!screenBody) return;
+    const cacheKey = twitterCacheKey(mode, characterName);
+    const entry = getPhoneAppContent(settings, context.chatId, cacheKey);
+    const isGenerating = twitterGeneratingKeys.has(cacheKey);
+    if (mode === 'feed') {
+        renderPhoneAppScreen(screenBody, {
+            appLabel: 'Twitter',
+            entry,
+            isGenerating,
+            formatRelativeTime,
+            showFollowingLink: true,
+        });
+    } else {
+        const rosterEntry = WEYLAND_ROSTER.find(c => c.name === characterName);
+        renderTwitterProfileScreen(screenBody, {
+            character: rosterEntry,
+            portraitMap: buildPortraitMap(context.characters, [characterName], context.getThumbnailUrl),
+            entry,
+            isGenerating,
+            formatRelativeTime,
+        });
+    }
 }
 
 // Re-renders whichever screen is currently visible, reflecting the latest generatingConversationIds
