@@ -4,7 +4,7 @@ import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonality
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from './lib/generation.js';
-import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState } from './lib/panel.js';
+import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap } from './lib/portraits.js';
@@ -12,11 +12,18 @@ import { parseReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages } from './lib/tetheredContext.js';
+import { PHONE_APP_PROMPTS } from './lib/phoneAppPrompts.js';
+import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
+import { parsePhoneAppOutput } from './lib/phoneAppFormatting.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
 let currentView = 'home'; // 'home' | 'contacts' | 'conversation' | 'memory'
 let currentConversationId = null;
+let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
+const PHONE_APP_LABELS = { chronicle: 'The Chronicle', discord: 'Discord', yikyak: 'Yik Yak' };
+const phoneAppGeneratingIds = new Set(); // tracks which app keys currently have a generation in flight
+const DEFAULT_PHONE_APP_MAX_TOKENS = 1024;
 let editingMessageIndex = -1;
 let editingMemoryId = null;
 let selectMode = false;
@@ -179,15 +186,115 @@ function updateSelectModeUI() {
     rerenderConversationMessages();
 }
 
-// Shared by showScreen('home') and refreshVisibleScreen()'s home branch — builds the Home list's
-// typing-decorated summaries and charName->portrait map, then renders.
-function renderHomeScreenNow(context, settings) {
+// Shared by showScreen('messages') and refreshVisibleScreen()'s messages branch — builds the
+// conversation list's typing-decorated summaries and charName->portrait map, then renders.
+function renderMessagesScreenNow(context, settings) {
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return;
     const summaries = withTypingState(getAllConversationSummaries(settings), generatingConversationIds);
     const charNames = summaries.map(summary => summary.charName);
     const portraitMap = buildPortraitMap(context.characters, charNames, context.getThumbnailUrl);
-    renderHomeScreen(screenBody, summaries, formatRelativeTime, portraitMap);
+    renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
+}
+
+// Runs (or re-runs) a flavor app's generation entirely read-only against the main roleplay's real
+// context — no mutation of context.chat anywhere in this function or anything it calls. This
+// replaces the prior milestone attempt's push/quiet-generate/pop mechanism, which caused a real
+// incident (a synthetic message got permanently saved to a user's real chat file when
+// SillyTavern's own autosave fired mid-generation, before the pop could run) — see this plan's
+// own "Why this plan exists" section. There is no live-array window to race here at all: this
+// function builds a request from data it reads (character fields, World Info text, a NEW array
+// from convertMainChatToMessages) and sends it via ConnectionManagerRequestService, the same path
+// WeyPhone's own texting Messages app already uses — context.chat itself is never touched.
+//
+// phoneAppGeneratingIds.add()/rerenderPhoneAppScreenIfVisible() MUST stay inside this try block —
+// this project's established stuck-lock bug class (a tracking-Set mutation placed before try)
+// applies here exactly the same way it does to generatingConversationIds/
+// memoryGeneratingConversationIds elsewhere in this file.
+async function runPhoneAppGeneration(appKey) {
+    if (phoneAppGeneratingIds.has(appKey)) return;
+    const context = SillyTavern.getContext();
+    if (!isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId })) {
+        toastr.info('No active roleplay to pull content from right now.', 'WeyPhone');
+        return;
+    }
+
+    try {
+        phoneAppGeneratingIds.add(appKey);
+        rerenderPhoneAppScreenIfVisible(appKey);
+
+        const settings = getSettings(context.extensionSettings);
+        const mainCharacter = context.characters[context.characterId];
+        if (!mainCharacter) {
+            toastr.info('No active roleplay to pull content from right now.', 'WeyPhone');
+            return;
+        }
+
+        const resolved = await resolveCharacterPrompt(context, mainCharacter);
+        const worldInfoAfter = await resolveWorldInfoTetheredForMainChat(context);
+        const mainHistory = convertMainChatToMessages(context.chat);
+
+        const systemPromptText = buildSystemPrompt({
+            systemPrompt: resolved.systemPrompt,
+            worldInfoBefore: '',
+            descriptionText: resolved.descriptionText,
+            personalityText: resolved.personalityText,
+            scenarioText: '',
+            worldInfoAfter,
+        });
+
+        const messages = buildMessages({
+            systemPromptText,
+            history: mainHistory,
+            userMessage: PHONE_APP_PROMPTS[appKey],
+        });
+
+        const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
+        const profileId = resolveProfileId(settings, activeProfileId);
+        const result = await sendMessage({
+            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_PHONE_APP_MAX_TOKENS),
+            profileId,
+            messages,
+        });
+
+        const rawText = typeof result === 'string' ? result : (result?.content ?? '');
+        const parsed = parsePhoneAppOutput(rawText);
+        if (parsed.sections.length === 0) {
+            toastr.warning('The model did not return usable content this time.', 'WeyPhone');
+            return;
+        }
+
+        setPhoneAppContent(settings, context.chatId, appKey, {
+            content: parsed,
+            generatedAt: Date.now(),
+            chatMessageCountAtGeneration: context.chat.length,
+        });
+        context.saveSettingsDebounced();
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Phone app generation failed:`, error);
+        toastr.error(error.message, 'WeyPhone');
+    } finally {
+        phoneAppGeneratingIds.delete(appKey);
+        rerenderPhoneAppScreenIfVisible(appKey);
+    }
+}
+
+// Re-renders the currently-visible phone-app screen if the user is actually looking at the app
+// this generation was for — mirrors rerenderIfStillViewing's guard for the same reason (the user
+// may have navigated away during the generation wait).
+function rerenderPhoneAppScreenIfVisible(appKey) {
+    if (currentView !== 'phone-app' || currentPhoneApp !== appKey) return;
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const screenBody = document.getElementById('wp-screen-body');
+    if (!screenBody) return;
+    const entry = getPhoneAppContent(settings, context.chatId, appKey);
+    renderPhoneAppScreen(screenBody, {
+        appLabel: PHONE_APP_LABELS[appKey],
+        entry,
+        isGenerating: phoneAppGeneratingIds.has(appKey),
+        formatRelativeTime,
+    });
 }
 
 // Re-renders whichever screen is currently visible, reflecting the latest generatingConversationIds
@@ -196,10 +303,10 @@ function renderHomeScreenNow(context, settings) {
 // generation is the one that just started/finished, and how the Conversation view picks up its own
 // typing bubble without a full showScreen() reload.
 function refreshVisibleScreen() {
-    if (currentView === 'home') {
+    if (currentView === 'messages') {
         const context = SillyTavern.getContext();
         const settings = getSettings(context.extensionSettings);
-        renderHomeScreenNow(context, settings);
+        renderMessagesScreenNow(context, settings);
         return;
     }
     if (currentView === 'conversation' && currentConversationId) {
@@ -647,6 +754,22 @@ function handleScreenBodyClick(event) {
         }
         return;
     }
+    const appTile = event.target.closest('.wp-app-tile');
+    if (appTile && !appTile.classList.contains('wp-app-tile-disabled')) {
+        const appKey = appTile.dataset.app;
+        if (appKey === 'messages') {
+            showScreen('messages');
+        } else {
+            currentPhoneApp = appKey;
+            showScreen('phone-app');
+        }
+        return;
+    }
+    const phoneAppRefreshBtn = event.target.closest('#wp-phone-app-refresh-button');
+    if (phoneAppRefreshBtn) {
+        if (!phoneAppRefreshBtn.disabled && currentPhoneApp) runPhoneAppGeneration(currentPhoneApp);
+        return;
+    }
     const regenerateButton = event.target.closest('#wp-regenerate-button');
     if (regenerateButton) {
         if (!regenerateButton.disabled) toggleRegenerateMenu();
@@ -801,9 +924,36 @@ function showScreen(view) {
     panel.dataset.view = view;
 
     if (view === 'home') {
+        title.textContent = 'Home';
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
+        const flavorAppsEnabled = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
+        renderAppGridScreen(screenBody, { flavorAppsEnabled });
+        return;
+    }
+
+    if (view === 'messages') {
         title.textContent = 'Messages';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
-        renderHomeScreenNow(context, settings);
+        renderMessagesScreenNow(context, settings);
+        return;
+    }
+
+    if (view === 'phone-app') {
+        if (!currentPhoneApp) {
+            showScreen('home');
+            return;
+        }
+        title.textContent = PHONE_APP_LABELS[currentPhoneApp];
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
+        rerenderPhoneAppScreenIfVisible(currentPhoneApp);
+
+        // Staleness check: if the main chat has moved on since this app's content was cached,
+        // automatically regenerate rather than requiring the user to notice and tap refresh.
+        const entry = getPhoneAppContent(settings, context.chatId, currentPhoneApp);
+        const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
+        if (isStale && !phoneAppGeneratingIds.has(currentPhoneApp)) {
+            runPhoneAppGeneration(currentPhoneApp);
+        }
         return;
     }
 
