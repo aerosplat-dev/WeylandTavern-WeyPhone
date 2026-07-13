@@ -103,7 +103,10 @@
 #wp-panel[data-view="conversation"] #wp-home-button,
 #wp-panel[data-view="contacts"] #wp-home-button,
 #wp-panel[data-view="messages"] #wp-home-button,
-#wp-panel[data-view="phone-app"] #wp-home-button {
+#wp-panel[data-view="phone-app"] #wp-home-button,
+#wp-panel[data-view="twitter-feed"] #wp-home-button,
+#wp-panel[data-view="twitter-following"] #wp-home-button,
+#wp-panel[data-view="twitter-profile"] #wp-home-button {
     display: flex;
 }
 
