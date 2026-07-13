@@ -7,6 +7,7 @@ import {
     formatMainHistoryTranscript,
     buildTetheredViewBlock,
     convertMainChatToMessages,
+    buildScanHistoryWithExtraText,
 } from '../lib/tetheredContext.js';
 
 test('isMainRoleplayActive is true when a solo character is selected', () => {
@@ -198,4 +199,39 @@ test('convertMainChatToMessages never mutates the input array', () => {
     convertMainChatToMessages(chat);
     assert.deepEqual(chat, original);
     assert.equal(chat.length, 1);
+});
+
+test('buildScanHistoryWithExtraText appends extraScanText as a trailing user entry', () => {
+    const mainHistory = [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }];
+    const result = buildScanHistoryWithExtraText(mainHistory, 'extra prompt text');
+    assert.deepEqual(result, [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'hello' },
+        { role: 'user', content: 'extra prompt text' },
+    ]);
+});
+
+test('buildScanHistoryWithExtraText returns the same array reference when extraScanText is omitted', () => {
+    const mainHistory = [{ role: 'user', content: 'hi' }];
+    const result = buildScanHistoryWithExtraText(mainHistory, undefined);
+    assert.equal(result, mainHistory);
+});
+
+test('buildScanHistoryWithExtraText returns the same array reference when extraScanText is an empty string', () => {
+    const mainHistory = [{ role: 'user', content: 'hi' }];
+    const result = buildScanHistoryWithExtraText(mainHistory, '');
+    assert.equal(result, mainHistory);
+});
+
+test('buildScanHistoryWithExtraText never mutates mainHistory', () => {
+    const mainHistory = [{ role: 'user', content: 'hi' }];
+    const original = [...mainHistory];
+    buildScanHistoryWithExtraText(mainHistory, 'extra');
+    assert.deepEqual(mainHistory, original);
+    assert.equal(mainHistory.length, 1);
+});
+
+test('buildScanHistoryWithExtraText works from an empty mainHistory', () => {
+    const result = buildScanHistoryWithExtraText([], 'extra prompt text');
+    assert.deepEqual(result, [{ role: 'user', content: 'extra prompt text' }]);
 });

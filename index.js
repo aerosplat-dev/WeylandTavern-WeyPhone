@@ -11,7 +11,7 @@ import { buildPortraitMap } from './lib/portraits.js';
 import { parseReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
-import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages } from './lib/tetheredContext.js';
+import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
 import { PHONE_APP_PROMPTS } from './lib/phoneAppPrompts.js';
 import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
 import { parsePhoneAppOutput } from './lib/phoneAppFormatting.js';
@@ -119,12 +119,19 @@ async function buildTetheredContext(context, conversation) {
 // chatMetadata.timedWorldInfo tightly around the scan — see lib/worldInfo.js for why this is
 // needed: a real (non-dry-run) WI scan against a synthetic history still writes real sticky/
 // cooldown bookkeeping onto the shared main-chat chatMetadata object.
-async function resolveWorldInfoTetheredForMainChat(context) {
+//
+// `extraScanText` (Task 9) is optional extra text — e.g. a phone app's own fixed prompt text —
+// appended as one more synthetic entry to a brand-new scan array via
+// buildScanHistoryWithExtraText, so it gets a chance to trigger real WI retrieval alongside the
+// real chat history, exactly mirroring how the real !Phone command's own fixed prompt text
+// already does this. Never mutates mainHistory or context.chat — see buildScanHistoryWithExtraText.
+async function resolveWorldInfoTetheredForMainChat(context, extraScanText) {
     try {
         const mainHistory = convertMainChatToMessages(context.chat);
+        const scanHistory = buildScanHistoryWithExtraText(mainHistory, extraScanText);
         const result = await resolveWorldInfoTethered({
             getWorldInfoPrompt: context.getWorldInfoPrompt,
-            history: mainHistory,
+            history: scanHistory,
             maxContext: context.maxContext ?? 4096,
             chatMetadata: context.chatMetadata,
         });
@@ -237,7 +244,7 @@ async function runPhoneAppGeneration(appKey) {
         }
 
         const resolved = await resolveCharacterPrompt(context, mainCharacter);
-        const worldInfoAfter = await resolveWorldInfoTetheredForMainChat(context);
+        const worldInfoAfter = await resolveWorldInfoTetheredForMainChat(context, PHONE_APP_PROMPTS[appKey]);
         const mainHistory = convertMainChatToMessages(context.chat);
 
         const systemPromptText = buildSystemPrompt({
