@@ -108,15 +108,19 @@ async function buildTetheredContext(context, conversation) {
 // the one-line fix to what tethered mode has actually meant since milestone 1: it already used
 // the real getWorldInfoPrompt engine, but scanned it against the wrong conversation.
 async function resolveWorldInfoTetheredForMainChat(context) {
-    const mainHistory = (context.chat || [])
-        .filter(m => !m.is_system && typeof m.mes === 'string' && m.mes.trim())
-        .map(m => ({ role: m.is_user ? 'user' : 'assistant', content: m.mes }));
-    const result = await resolveWorldInfoTethered({
-        getWorldInfoPrompt: context.getWorldInfoPrompt,
-        history: mainHistory,
-        maxContext: context.maxContext ?? 4096,
-    });
-    return [result.worldInfoBefore, result.worldInfoAfter].filter(Boolean).join('\n\n');
+    try {
+        const mainHistory = (context.chat || [])
+            .filter(m => !m.is_system && typeof m.mes === 'string' && m.mes.trim())
+            .map(m => ({ role: m.is_user ? 'user' : 'assistant', content: m.mes }));
+        const result = await resolveWorldInfoTethered({
+            getWorldInfoPrompt: context.getWorldInfoPrompt,
+            history: mainHistory,
+            maxContext: context.maxContext ?? 4096,
+        });
+        return [result.worldInfoBefore, result.worldInfoAfter].filter(Boolean).join('\n\n');
+    } catch {
+        return '';
+    }
 }
 
 function updateRegenerateEnabled(conversation) {
