@@ -52,7 +52,7 @@ test('resolveMainActiveLtmEntries falls back to the sanitized "Chat Book <chatId
         return { entries: {} };
     };
     await resolveMainActiveLtmEntries({ loadWorldInfo, chatMetadata: {}, chatId: 'My Chat!!.jsonl' });
-    assert.equal(requestedName, 'Chat Book My_Chat_jsonl');
+    assert.equal(requestedName, 'Chat_Book_My_Chat_jsonl');
 });
 
 test('resolveMainActiveLtmEntries filters to entries that look like LTM AND are currently constant', async () => {
