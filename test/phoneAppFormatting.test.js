@@ -2,106 +2,74 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parsePhoneAppOutput } from '../lib/phoneAppFormatting.js';
 
-// All three fixtures below are REAL raw output captured live from the actual running platform
-// (SillyTavern's real generate('quiet', {}) via the push/quiet-generate/pop mechanism in
-// lib/phoneCommand.js), against the 'Rosa' main-roleplay chat (character 'Rosa', chatId
-// 'Rosa - 2025-11-02@22h06m12s', 75 existing messages) — not hypothetical/idealized examples.
-// See .superpowers/sdd/task-3-report.md for the full capture transcript and chat-integrity check.
+// All three fixtures below are REAL raw output captured live from the actual running platform's
+// WeyPhone panel (Home -> app grid -> Chronicle/Discord/Yik Yak -> Refresh), via
+// ConnectionManagerRequestService against the 'Rosa' main-roleplay chat (character 'Rosa', chatId
+// 'Rosa - 2025-11-02@22h06m12s', 75 existing messages, byte-identical before/after capture) — not
+// hypothetical/idealized examples. See .superpowers/sdd/task-7-report.md for the full capture
+// transcript and chat-integrity check. This is WeyPhone's own markdown output format (Task 2's
+// lib/phoneAppPrompts.js), not the prior milestone's real platform !Phone command HTML output.
 
-const REAL_CHRONICLE_OUTPUT = `Mack's Phone
+const REAL_CHRONICLE_OUTPUT = `## WEYLAND ALERTS
+- [9:14 AM] Senaka Boulevard pedestrian lighting between Sterling Hall and Kyomi Dining Hall is under maintenance through Sunday. Use caution in the affected stretch after dark, and allow extra travel time.
+- [2:30 PM] A Pacific front is tracking toward the coast. Expect rain and gusty winds beginning late Saturday evening, with conditions clearing by Sunday afternoon. Secure any outdoor items.
+- [4:45 PM] The Kodo Bowl Amphitheater south gate will be closed this weekend for concrete resurfacing. All events will use the north and east entrances only.
 
-<div style="background-color: #1a1a1a; border: 1px solid #444; border-radius: 8px; padding: 16px; font-family: monospace; color: #f0f0f0; max-width: 600px; margin: auto;">
-<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 12px; font-weight: bold; color: #66d9ef;">
-<span>Mack's Phone</span>
-<span>68% [//////&nbsp;&nbsp;&nbsp;]</span>
-</div>
+## HEADLINES
+- Weyland City Council approves rezoning along the waterfront corridor after three-hour session Tuesday, clearing the way for a mixed-use development that has divided residents and local business owners for over a year.
+- Red Lantern Ramen cited for outdoor seating ordinance violation after expanding patio furniture six inches past the approved boundary; owner Mr. Wolfy declined comment, reportedly gesturing at a ladle.
+- Tetsuya Market announces expanded hours through spring semester following a surge in late-night foot traffic attributed to students avoiding the dining hall's Friday fish option.
+- Soft Pike Trailer Park residents file formal noise complaint with the city for the third consecutive weekend; complaint lists "excessive bass audible from inside sealed vehicles" as primary grievance.
+- A juvenile draconid was recovered unharmed Wednesday after becoming lodged in the decorative ironwork above the Weyland Post Office entrance; fire crew response time was approximately eleven minutes.
+- Black Barrel quietly applies for extended weekend hours permit, citing "changing student social patterns." The permit, if approved, would push last call from 2:00 AM to 3:00 AM on Fridays and Saturdays.
+- Local human-interest: retired okamimi couple celebrates fifty-two years in Weyland City, crediting longevity to "walking Senaka every morning, no matter what."
+- Weyland Research Center confirms a three-year coastal erosion study will expand its monitoring stations along the campus beachfront beginning next month, partnering with the university's Marine Biology department.`;
 
-<div style="font-weight: bold; color: #a6e22e; text-transform: uppercase; text-align: center;">━━━━━━━━━【 ✧･ﾟ: *✧ WEYLAND ALERTS ✧*:･ﾟ✧ 】━━━━━━━━━</div>
-<ul>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #fd971f;">10:52 PM</span> — <span style="color: #f92672;">Weather Advisory</span>: Light rain expected after 2AM, clearing by morning. Temps dropping to low 50s overnight.</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #fd971f;">9:15 PM</span> — <span style="color: #f92672;">Campus Notice</span>: Sterling Hall community kitchen closed for deep cleaning tomorrow 8AM-2PM. Plan meals accordingly.</li>
-</ul>
+const REAL_DISCORD_OUTPUT = `## DISCORD
 
-<div style="font-weight: bold; color: #a6e22e; text-transform: uppercase; text-align: center;">━━━━━━━━━【 ✧･ﾟ: *✧ SOCIAL MEDIA ✧*:･ﾟ✧ 】━━━━━━━━━</div>
-<ul>
-<li style="margin-bottom: 8px; line-height: 1.4;">DISCORD: [<span style="color: #ae81ff;">@luckypaww</span>] in #announcements: "Someone please explain to me why the Rivera party subbot logic is spawning FOUR separate Reggie NPCs. One Reggie. There is only one Reggie. Purging the duplicates now, expect some flicker."</li>
-<li style="margin-bottom: 8px; line-height: 1.4;">DISCORD: [<span style="color: #ae81ff;">@codewolf</span>] in #dorm-commons: "if mack doesn't come home tonight im telling the RA he died. saves me explaining the smell when he shows up hungover at 6am"</li>
-<div style="border-left: 2px solid #66d9ef; padding-left: 8px; margin-top: 4px;">
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">@breakingthecycle</span>: not my problem anymore lol</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">@codewolf</span>: nobody asked kai</li>
-</div>
-</ul>
+## #announcements
+- [9:14 PM] **@luckypaww** — pushed a hotfix tonight, Rosa's expression system was returning [Neutral] on literally everything including a scene where she jumped off a diving board naked. fixed. if you saw weird sprite behavior in the last hour that was why. please do not DM me about this i already know
 
-<div style="font-weight: bold; color: #a6e22e; text-transform: uppercase; text-align: center;">━━━━━━━━━【 ✧･ﾟ: *✧ MESSAGES ✧*:･ﾟ✧ 】━━━━━━━━━</div>
-<ul>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">Blake</span> <span style="color: #fd971f;">11:03 PM</span>: "someone sent me a video of a naked man doing a cannonball off rivera's diving board and I swear to god if that's you I'm changing the locks"</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">Vera</span> <span style="color: #fd971f;">10:41 PM</span>: "hey sooo this party sucks and I'm hiding in a bathroom rn can you come get me or is that weird lol no worries either way!! :)"</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">Sterling Hall Front Desk</span> <span style="color: #fd971f;">9:30 PM</span>: "Reminder: lost key replacement fee is $40, please stop by during office hours if applicable."</li>
-</ul>
-</div>`;
+- [9:47 PM] **@luckypaww** — also the Regie NPC was not supposed to be persistent across scenes, he just kind of kept showing up and getting dunked and i left it in because honestly it was funier than whatever i had planned. you're welcome
 
-const REAL_TWITTER_OUTPUT = `<div style="background-color: #1a1a1a; border: 1px solid #444; border-radius: 8px; padding: 16px; font-family: monospace; color: #f0f0f0; max-width: 600px; margin: auto;">
-<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 12px; font-weight: bold; color: #66d9ef;">
-Mack's Phone
-<span>34% [///       ]</span>
-</div>
+## #dorm-commons
+- [10:02 PM] **@MikaFDIGL** — spinning tonight at Rivera's, someone bring me a red bull i forgot mine and i will literally die without it, not joking, cardiac event incoming
 
-<div style="font-weight: bold; color: #a6e22e; text-transform: uppercase; text-align: center;">━━━━━━━━━【 ✧･ﾟ: *✧ WEYLAND ALERTS ✧*:･ﾟ✧ 】━━━━━━━━━</div>
-<ul style="padding-left: 16px;">
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #f92672;">Weather Advisory</span> <span style="color: #fd971f;">[11:02 PM]</span> — Light rain expected overnight, clearing by mid-morning. Low near 51°F. Nothing that'll stop a party from happening in your backyard, apparently.</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #f92672;">Noise Complaint Notice</span> <span style="color: #fd971f;">[10:48 PM]</span> — Campus Safety received 2 noise reports near off-campus student housing on Birchwood Ln. Officers advised to "assess before engaging" per new de-escalation policy.</li>
-</ul>
+- [10:38 PM] **@belle_281** — okay so hypothetically if a wolfboy's limited edition nikes were at the bottom of rivera's pool that is NOT my problem legally speaking
 
-<div style="font-weight: bold; color: #a6e22e; text-transform: uppercase; text-align: center;">━━━━━━━━━【 ✧･ﾟ: *✧ SOCIAL MEDIA ✧*:･ﾟ✧ 】━━━━━━━━━</div>
-<ul style="padding-left: 16px;">
-<li style="margin-bottom: 8px; line-height: 1.4;">[<span style="color: #ae81ff;">@luckypaww</span>] in #announcements: "hey uh, why does Bianca's photography feed suddenly have 40 unposted drafts of just... doorknobs. no context. investigating."</li>
-<li style="margin-bottom: 8px; line-height: 1.4;">[<span style="color: #ae81ff;">@codewolf</span>] posted: "mack better not track pool water into our room tonight or I'm hiding his charger for a week 💀"</li>
-<li style="margin-bottom: 8px; line-height: 1.4;">
-[<span style="color: #ae81ff;">@breakingthecycle</span>]: "SOMEONE TELL ME WHY THERE'S A VIDEO OF A NAKED GUY WALKING THROUGH RIVERA'S LIVING ROOM ON MY TIMELINE"
-<div style="border-left: 2px solid #66d9ef; padding-left: 8px; margin-top: 4px;">
-[<span style="color: #ae81ff;">@luxuryiafford</span>]: "oh honey. oh honey no. don't click on that one."
-</div>
-</li>
-</ul>
+- [11:01 PM] **@KoshizuW** — wait is that mack streaking through the living room on somebody's story right now?? hello? weyland never disappoints
 
-<div style="font-weight: bold; color: #a6e22e; text-transform: uppercase; text-align: center;">━━━━━━━━━【 ✧･ﾟ: *✧ MESSAGES ✧*:･ﾟ✧ 】━━━━━━━━━</div>
-<ul style="padding-left: 16px;">
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">Blake</span> <span style="color: #fd971f;">[11:05 PM]</span>: "if I see one single wet footprint on my side of the room tomorrow I'm telling everyone about the ladle incident"</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">Jenn</span> <span style="color: #fd971f;">[10:51 PM]</span>: "haven't seen u around in forever :( miss our mario kart nights lol"</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">Sterling Hall Front Desk</span> <span style="color: #fd971f;">[9:30 PM]</span>: "Reminder: quiet hours begin 12AM. Package pickup window extended to 10PM this week only."</li>
-</ul>
-</div>`;
+## #weyland-sports
+- [10:55 PM] **@WeylandAthletics** — reminder that the pool facility requires athletic shorts or approved swimwear at ALL times per campus policy. this is not directed at anyone specifically. it is directed at everyone specifically.
 
-const REAL_CONFESSIONS_OUTPUT = `<div style="background-color: #1a1a1a; border: 1px solid #444; border-radius: 8px; padding: 16px; font-family: monospace; color: #f0f0f0; max-width: 600px; margin: auto;">
-<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 12px; font-weight: bold; color: #66d9ef;">
-<span>Mack's Phone</span><span>34% [///       ]</span>
-</div>
+- [11:08 PM] **@ReggieT_okami** — i want it on record that i was pushed into that pool TWICE by the same person and my shoes are gone. campus security was useless. this is a war crime. i have witnesses.
 
-<div style="font-weight: bold; color: #a6e22e; text-transform: uppercase; text-align: center;">━━━━━━━━━【 ✧･ﾟ: *✧ WEYLAND ALERTS ✧*:･ﾟ✧ 】━━━━━━━━━</div>
-<ul>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #f92672;">Weather Advisory</span> <span style="color: #fd971f;">11:15 PM</span> — Light rain expected after 2AM, clearing by morning. Temps dropping to low 50s.</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #f92672;">Campus Notice</span> <span style="color: #fd971f;">10:50 PM</span> — Noise complaints filed near Senaka Blvd residential zone. Weyland PD requests house parties keep volume down after midnight.</li>
-</ul>
+## #occult-and-theology
+- [10:17 PM] **@ElieFox109** — anyone else notice the powerwolf track mika dropped at 10:15 was literally Blessed and Possessed, sequential to Army of the Night. that's not a coincidence that a setlist with INTENT and i respect it deeply
 
-<div style="font-weight: bold; color: #a6e22e; text-transform: uppercase; text-align: center;">━━━━━━━━━【 ✧･ﾟ: *✧ SOCIAL MEDIA ✧*:･ﾟ✧ 】━━━━━━━━━</div>
-<ul>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">[&lt;@luckypaww&gt;]</span> in #announcements: <span style="color: #fd971f;">11:02 PM</span> — "why does the Reggie subbot keep trying to diving-board off things that aren't diving boards. he tried to dive off a KEG. someone's getting a stern talking to."</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">[&lt;@codewolf&gt;]</span> in #dorm-commons: <span style="color: #fd971f;">10:58 PM</span> — "mack better come home with a good excuse tomorrow morning or im changing his door lock code out of spite"</li>
-<li style="margin-bottom: 8px; line-height: 1.4;">
-<span style="color: #ae81ff;">@QKittonMod</span>: "another dog breeding ground rager huh. real shocker"
-<div style="border-left: 2px solid #66d9ef; padding-left: 8px; margin-top: 4px;">
-<span style="color: #ae81ff;">@youwouldntgetit</span>: "kris i will drain every ounce of blood from your body and it will improve you"
-</div>
-</li>
-</ul>
+- [10:44 PM] **@RosaH_315** — elie you are the only person this campus who would notice that and i love you for it. powerwolf is scripture and mika knows it. she's one of us now`;
 
-<div style="font-weight: bold; color: #a6e22e; text-transform: uppercase; text-align: center;">━━━━━━━━━【 ✧･ﾟ: *✧ MESSAGES ✧*:･ﾟ✧ 】━━━━━━━━━</div>
-<ul>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">Blake</span> <span style="color: #fd971f;">11:04 PM</span> — "heard you're at rivera's. heard you're naked. heard reggie's shoes are in a pool. explain yourself when you get home shark boy"</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">Vera</span> <span style="color: #fd971f;">10:47 PM</span> — "hiii!! having a good night?? 💚 (mine's fine. totally fine. everyone here is SO fun to be around lol)"</li>
-<li style="margin-bottom: 8px; line-height: 1.4;"><span style="color: #ae81ff;">Sterling Hall Front Desk</span> <span style="color: #fd971f;">10:30 PM</span> — "Reminder: quiet hours begin at 12AM. Guest check-in closes at 1AM sharp."</li>
-</ul>
-</div>`;
+const REAL_YIKYAK_OUTPUT = `## YIK YAK
+
+- [11:04 PM] whoever just ran naked through rivera's party carrying a bottle of whiskey and waved at people on the way back out — i am in love with you. please find me. +134
+
+- [11:06 PM] the guy had GILLS. i saw them. between his ears when he surfaced in the pool. what the FUCK is a makohire and why did nobody tell me they look like THAT +89
+
+- [10:48 PM] my roomate took my shower cady AGAIN. it has my name on it in sharpie. i am going to lose my goddamn mind. this is the fourth time. FOURTH. +61
+
+- [11:09 PM] regie lost his shoes dignity and his dry clothes tonight and the night is still young. pouring one out for him but also i kind of feel like he had it coming +77
+
+- [10:22 PM] why does the dining hall smell like burning rubber every thursday specifically. every single thursday. what are they MAKING in there +44
+
+- [11:07 PM] someone at rivera's party just canonballed naked off the high dive screaming something about powerwolf and it was genuinely the most spiritual experience of my life +203
+
+- [10:55 PM] missed connection: hot tub at the stark party. you had anorca tail and purple eyes and you looked at me like i was an inconvenience and i haven't recovered +91
+
+- [11:02 PM] the amount of blacklight-reactive things i have seen tonight that i was NOT supposed to see. i need to go to church. +156
+
+- [10:31 PM] anyone else feel like the sophomore chem building smells different than last semester or is that just me. asking for completely unrelated reasons. +38
+
+- [11:11 PM] rivera is currently crying in the pantry because someone opened her dad's good bourbon. she is also the one who opened it. this party is incredible. +118`;
 
 test('parsePhoneAppOutput extracts at least one section with a title from real captured Chronicle output', () => {
     const result = parsePhoneAppOutput(REAL_CHRONICLE_OUTPUT);
@@ -109,73 +77,96 @@ test('parsePhoneAppOutput extracts at least one section with a title from real c
     assert.ok(result.sections[0].title.length > 0);
 });
 
-test('parsePhoneAppOutput extracts multiple items within a section from real captured Chronicle output', () => {
+test('parsePhoneAppOutput extracts multiple items from real captured Chronicle output', () => {
     const result = parsePhoneAppOutput(REAL_CHRONICLE_OUTPUT);
     const totalItems = result.sections.reduce((sum, s) => sum + s.items.length, 0);
     assert.ok(totalItems > 1, 'expected more than one item across all sections');
 });
 
-test('parsePhoneAppOutput never includes the raw HTML style attributes in extracted item text (Chronicle)', () => {
+test('parsePhoneAppOutput never includes raw markdown syntax in extracted item text from real captured Chronicle output', () => {
     const result = parsePhoneAppOutput(REAL_CHRONICLE_OUTPUT);
     for (const section of result.sections) {
         for (const item of section.items) {
-            assert.doesNotMatch(item.text, /style="/);
-            assert.doesNotMatch(item.text, /<div/);
+            assert.doesNotMatch(item.text, /^##/);
+            assert.doesNotMatch(item.text, /^- /);
+            assert.doesNotMatch(item.text, /\*\*/, 'no raw markdown bold markers should leak through');
         }
     }
 });
 
-test('parsePhoneAppOutput extracts at least one section with a title from real captured Twitter output', () => {
-    const result = parsePhoneAppOutput(REAL_TWITTER_OUTPUT);
+test('parsePhoneAppOutput extracts at least one section with a title from real captured Discord output', () => {
+    const result = parsePhoneAppOutput(REAL_DISCORD_OUTPUT);
     assert.ok(result.sections.length > 0, 'expected at least one section to be extracted from real output');
     assert.ok(result.sections[0].title.length > 0);
 });
 
-test('parsePhoneAppOutput extracts multiple items within a section from real captured Twitter output', () => {
-    const result = parsePhoneAppOutput(REAL_TWITTER_OUTPUT);
+test('parsePhoneAppOutput extracts multiple items from real captured Discord output', () => {
+    const result = parsePhoneAppOutput(REAL_DISCORD_OUTPUT);
     const totalItems = result.sections.reduce((sum, s) => sum + s.items.length, 0);
     assert.ok(totalItems > 1, 'expected more than one item across all sections');
 });
 
-test('parsePhoneAppOutput never includes the raw HTML style attributes in extracted item text (Twitter)', () => {
-    const result = parsePhoneAppOutput(REAL_TWITTER_OUTPUT);
+test('parsePhoneAppOutput never includes raw markdown syntax in extracted item text from real captured Discord output', () => {
+    const result = parsePhoneAppOutput(REAL_DISCORD_OUTPUT);
     for (const section of result.sections) {
         for (const item of section.items) {
-            assert.doesNotMatch(item.text, /style="/);
-            assert.doesNotMatch(item.text, /<div/);
+            assert.doesNotMatch(item.text, /^##/);
+            assert.doesNotMatch(item.text, /^- /);
+            assert.doesNotMatch(item.text, /\*\*/, 'no raw markdown bold markers should leak through');
         }
     }
 });
 
-test('parsePhoneAppOutput extracts at least one section with a title from real captured Confessions output', () => {
-    const result = parsePhoneAppOutput(REAL_CONFESSIONS_OUTPUT);
+test('parsePhoneAppOutput extracts at least one section with a title from real captured Yik Yak output', () => {
+    const result = parsePhoneAppOutput(REAL_YIKYAK_OUTPUT);
     assert.ok(result.sections.length > 0, 'expected at least one section to be extracted from real output');
     assert.ok(result.sections[0].title.length > 0);
 });
 
-test('parsePhoneAppOutput extracts multiple items within a section from real captured Confessions output', () => {
-    const result = parsePhoneAppOutput(REAL_CONFESSIONS_OUTPUT);
+test('parsePhoneAppOutput extracts multiple items from real captured Yik Yak output', () => {
+    const result = parsePhoneAppOutput(REAL_YIKYAK_OUTPUT);
     const totalItems = result.sections.reduce((sum, s) => sum + s.items.length, 0);
     assert.ok(totalItems > 1, 'expected more than one item across all sections');
 });
 
-test('parsePhoneAppOutput never includes the raw HTML style attributes in extracted item text (Confessions)', () => {
-    const result = parsePhoneAppOutput(REAL_CONFESSIONS_OUTPUT);
+test('parsePhoneAppOutput never includes raw markdown syntax in extracted item text from real captured Yik Yak output', () => {
+    const result = parsePhoneAppOutput(REAL_YIKYAK_OUTPUT);
     for (const section of result.sections) {
         for (const item of section.items) {
-            assert.doesNotMatch(item.text, /style="/);
-            assert.doesNotMatch(item.text, /<div/);
+            assert.doesNotMatch(item.text, /^##/);
+            assert.doesNotMatch(item.text, /^- /);
+            assert.doesNotMatch(item.text, /\*\*/, 'no raw markdown bold markers should leak through');
         }
     }
 });
 
-test('parsePhoneAppOutput real captured output section titles match what the model actually produced', () => {
+test('parsePhoneAppOutput real captured Chronicle section titles match what the model actually produced', () => {
     // Sanity-check against the real observed section names so a future regex change that silently
-    // stops matching the model's actual divider format gets caught here, not just via a generic
-    // 'length > 0' assertion.
+    // stops matching the model's actual markdown header format gets caught here, not just via a
+    // generic 'length > 0' assertion.
     const chronicle = parsePhoneAppOutput(REAL_CHRONICLE_OUTPUT);
     const titles = chronicle.sections.map(s => s.title);
-    assert.deepEqual(titles, ['WEYLAND ALERTS', 'SOCIAL MEDIA', 'MESSAGES']);
+    assert.deepEqual(titles, ['WEYLAND ALERTS', 'HEADLINES']);
+});
+
+test('parsePhoneAppOutput drops the real captured Discord output\'s leading empty "## DISCORD" header', () => {
+    // Real captured Discord output emits a bare "## DISCORD" header with no bullets under it
+    // before the actual per-channel "## #announcements"/"## #dorm-commons" sub-headers start —
+    // confirms the empty-section-drop behavior against the actual fixture that motivated it.
+    const discord = parsePhoneAppOutput(REAL_DISCORD_OUTPUT);
+    const titles = discord.sections.map(s => s.title);
+    assert.ok(!titles.includes('DISCORD'), 'the empty leading "DISCORD" header should be dropped, not rendered as an empty section');
+    assert.ok(titles.some(t => t.startsWith('#')), 'expected real per-channel sub-headers to survive as sections');
+});
+
+test('parsePhoneAppOutput extracts real captured timestamps from Chronicle and Yik Yak output', () => {
+    const chronicle = parsePhoneAppOutput(REAL_CHRONICLE_OUTPUT);
+    const chronicleTimestamps = chronicle.sections.flatMap(s => s.items).map(i => i.timestamp).filter(Boolean);
+    assert.ok(chronicleTimestamps.length > 0, 'expected at least one Chronicle item to have a parsed timestamp');
+
+    const yikyak = parsePhoneAppOutput(REAL_YIKYAK_OUTPUT);
+    const yikyakTimestamps = yikyak.sections.flatMap(s => s.items).map(i => i.timestamp).filter(Boolean);
+    assert.ok(yikyakTimestamps.length > 0, 'expected at least one Yik Yak item to have a parsed timestamp');
 });
 
 test('parsePhoneAppOutput returns an empty sections array for empty input', () => {
@@ -183,7 +174,7 @@ test('parsePhoneAppOutput returns an empty sections array for empty input', () =
 });
 
 test('parsePhoneAppOutput returns an empty sections array (never throws) for garbage input', () => {
-    assert.deepEqual(parsePhoneAppOutput('not html at all, just plain text with no structure'), { sections: [] });
+    assert.deepEqual(parsePhoneAppOutput('not markdown at all, just plain text with no structure'), { sections: [] });
 });
 
 test('parsePhoneAppOutput returns an empty sections array (never throws) for non-string input', () => {
