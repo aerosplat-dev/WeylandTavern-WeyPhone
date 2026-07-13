@@ -1,0 +1,152 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+    isMainRoleplayActive,
+    resolveMainActiveLtmEntries,
+    resolveMainHistorySlice,
+    formatMainHistoryTranscript,
+    buildTetheredViewBlock,
+} from '../lib/tetheredContext.js';
+
+test('isMainRoleplayActive is true when a solo character is selected', () => {
+    assert.equal(isMainRoleplayActive({ characterId: 3, groupId: undefined }), true);
+});
+
+test('isMainRoleplayActive is true when a group chat is active', () => {
+    assert.equal(isMainRoleplayActive({ characterId: undefined, groupId: 'group-1' }), true);
+});
+
+test('isMainRoleplayActive is false when neither a character nor a group is selected', () => {
+    assert.equal(isMainRoleplayActive({ characterId: undefined, groupId: undefined }), false);
+});
+
+test('isMainRoleplayActive treats characterId 0 as a valid selection, not falsy-absent', () => {
+    // this_chid is a real array index and can legitimately be 0 — must not be treated as "unset"
+    assert.equal(isMainRoleplayActive({ characterId: 0, groupId: undefined }), true);
+});
+
+test('resolveMainActiveLtmEntries returns [] when no book is bound in chatMetadata', async () => {
+    const loadWorldInfo = async () => { throw new Error('should not be called'); };
+    const result = await resolveMainActiveLtmEntries({ loadWorldInfo, chatMetadata: {}, chatId: 'chat_1' });
+    assert.deepEqual(result, []);
+});
+
+test('resolveMainActiveLtmEntries loads the bound book name from chatMetadata.world_info', async () => {
+    let requestedName;
+    const loadWorldInfo = async (name) => {
+        requestedName = name;
+        return { entries: {} };
+    };
+    await resolveMainActiveLtmEntries({
+        loadWorldInfo,
+        chatMetadata: { world_info: 'Chat Book chat_1' },
+        chatId: 'chat_1',
+    });
+    assert.equal(requestedName, 'Chat Book chat_1');
+});
+
+test('resolveMainActiveLtmEntries falls back to the sanitized "Chat Book <chatId>" name when chatMetadata has no binding', async () => {
+    let requestedName;
+    const loadWorldInfo = async (name) => {
+        requestedName = name;
+        return { entries: {} };
+    };
+    await resolveMainActiveLtmEntries({ loadWorldInfo, chatMetadata: {}, chatId: 'My Chat!!.jsonl' });
+    assert.equal(requestedName, 'Chat Book My_Chat_jsonl');
+});
+
+test('resolveMainActiveLtmEntries filters to entries that look like LTM AND are currently constant', async () => {
+    const loadWorldInfo = async () => ({
+        entries: {
+            0: { automationId: 'ltm:abc', content: 'active memory', constant: true },
+            1: { automationId: 'ltm:def', content: 'dormant memory', constant: false },
+            2: { automationId: '', content: 'unrelated WI entry', constant: true },
+        },
+    });
+    const result = await resolveMainActiveLtmEntries({ loadWorldInfo, chatMetadata: { world_info: 'Chat Book chat_1' }, chatId: 'chat_1' });
+    assert.deepEqual(result.map(e => e.content), ['active memory']);
+});
+
+test('resolveMainActiveLtmEntries recognizes legacy numeric automationId entries via comment/content pattern', async () => {
+    const loadWorldInfo = async () => ({
+        entries: {
+            0: { automationId: '42', comment: 'MEMORY ENTRY', content: 'legacy active memory', constant: true },
+            1: { automationId: '43', comment: 'unrelated', content: 'not a memory', constant: true },
+        },
+    });
+    const result = await resolveMainActiveLtmEntries({ loadWorldInfo, chatMetadata: { world_info: 'Chat Book chat_1' }, chatId: 'chat_1' });
+    assert.deepEqual(result.map(e => e.content), ['legacy active memory']);
+});
+
+test('resolveMainHistorySlice defaults to everything since lastLtmMessageId + 1', () => {
+    const chat = [
+        { name: 'A', mes: 'm0', is_user: true }, { name: 'B', mes: 'm1', is_user: false },
+        { name: 'A', mes: 'm2', is_user: true }, { name: 'B', mes: 'm3', is_user: false },
+    ];
+    const result = resolveMainHistorySlice({ chat, lastLtmMessageId: 1, historyCap: null });
+    assert.deepEqual(result.map(m => m.mes), ['m2', 'm3']);
+});
+
+test('resolveMainHistorySlice treats an absent lastLtmMessageId (-1) as "the whole chat"', () => {
+    const chat = [{ name: 'A', mes: 'm0', is_user: true }, { name: 'B', mes: 'm1', is_user: false }];
+    const result = resolveMainHistorySlice({ chat, lastLtmMessageId: -1, historyCap: null });
+    assert.deepEqual(result.map(m => m.mes), ['m0', 'm1']);
+});
+
+test('resolveMainHistorySlice uses a fixed last-N cap when historyCap is a number, overriding lastLtmMessageId', () => {
+    const chat = [
+        { name: 'A', mes: 'm0', is_user: true }, { name: 'B', mes: 'm1', is_user: false },
+        { name: 'A', mes: 'm2', is_user: true }, { name: 'B', mes: 'm3', is_user: false },
+    ];
+    const result = resolveMainHistorySlice({ chat, lastLtmMessageId: -1, historyCap: 2 });
+    assert.deepEqual(result.map(m => m.mes), ['m2', 'm3']);
+});
+
+test('resolveMainHistorySlice returns [] when lastLtmMessageId already covers the whole chat', () => {
+    const chat = [{ name: 'A', mes: 'm0', is_user: true }];
+    const result = resolveMainHistorySlice({ chat, lastLtmMessageId: 0, historyCap: null });
+    assert.deepEqual(result, []);
+});
+
+test('formatMainHistoryTranscript formats each message as "Name: text" per line', () => {
+    const messages = [{ name: 'Alice', mes: 'hello there' }, { name: 'Bob', mes: 'hi Alice' }];
+    assert.equal(formatMainHistoryTranscript(messages), 'Alice: hello there\nBob: hi Alice');
+});
+
+test('formatMainHistoryTranscript skips is_system messages', () => {
+    const messages = [
+        { name: 'System', mes: 'a system note', is_system: true },
+        { name: 'Alice', mes: 'real line', is_system: false },
+    ];
+    assert.equal(formatMainHistoryTranscript(messages), 'Alice: real line');
+});
+
+test('formatMainHistoryTranscript skips empty/whitespace-only messages', () => {
+    const messages = [{ name: 'Alice', mes: '   ' }, { name: 'Bob', mes: 'real line' }];
+    assert.equal(formatMainHistoryTranscript(messages), 'Bob: real line');
+});
+
+test('buildTetheredViewBlock wraps all three sections in the exact [TETHERED VIEW] framing', () => {
+    const result = buildTetheredViewBlock({
+        worldInfoText: 'Some lore.',
+        ltmEntries: [{ content: 'They met at the docks.' }],
+        historyTranscript: 'Alice: hi\nBob: hey',
+    });
+    assert.match(result, /^\[TETHERED VIEW\]/);
+    assert.match(result, /Below is another roleplay \{\{user\}\} is currently running, shown to you for context only — you are\nnot in it and can't act within it\. If \{\{user\}\} brings it up, react the way YOUR personality\nactually would, not generically; otherwise ignore it\./);
+    assert.match(result, /Some lore\./);
+    assert.match(result, /They met at the docks\./);
+    assert.match(result, /Alice: hi/);
+    assert.match(result, /\[END TETHERED VIEW\]$/);
+});
+
+test('buildTetheredViewBlock omits a section entirely when its input is empty', () => {
+    const result = buildTetheredViewBlock({ worldInfoText: '', ltmEntries: [], historyTranscript: 'Alice: hi' });
+    assert.doesNotMatch(result, /Some lore/);
+    assert.match(result, /Alice: hi/);
+});
+
+test('buildTetheredViewBlock returns an empty string when all three sections are empty', () => {
+    const result = buildTetheredViewBlock({ worldInfoText: '', ltmEntries: [], historyTranscript: '' });
+    assert.equal(result, '');
+});
