@@ -4,7 +4,7 @@ import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonality
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from './lib/generation.js';
-import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen } from './lib/panel.js';
+import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, setModeToggleVisible } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap } from './lib/portraits.js';
@@ -892,6 +892,13 @@ function handleStartConversation(charName) {
     showScreen('conversation');
 }
 
+// Body completed in the next task (Task 8), which adds findOrCreateDedicatedAppConversation to
+// lib/storage.js. Placeholder here keeps this task's own diff syntactically valid and testable in
+// isolation; Task 8 replaces this with the real implementation.
+function openAethelConversation() {
+    toastr.info('Coming soon.', 'WeyPhone');
+}
+
 function handleDeleteConversation(id) {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
@@ -950,15 +957,38 @@ function handleScreenBodyClick(event) {
         const appKey = appTile.dataset.app;
         if (appKey === 'messages') {
             showScreen('messages');
+        } else if (appKey === 'twitter') {
+            showScreen('twitter-feed');
+        } else if (appKey === 'athel') {
+            openAethelConversation();
         } else {
             currentPhoneApp = appKey;
             showScreen('phone-app');
         }
         return;
     }
+
+    const followingLinkBtn = event.target.closest('#wp-twitter-following-link');
+    if (followingLinkBtn) {
+        showScreen('twitter-following');
+        return;
+    }
+
+    const followingItem = event.target.closest('.wp-twitter-following-item');
+    if (followingItem) {
+        currentTwitterProfileCharacter = followingItem.dataset.name;
+        showScreen('twitter-profile');
+        return;
+    }
     const phoneAppRefreshBtn = event.target.closest('#wp-phone-app-refresh-button');
-    if (phoneAppRefreshBtn) {
-        if (!phoneAppRefreshBtn.disabled && currentPhoneApp) runPhoneAppGeneration(currentPhoneApp);
+    if (phoneAppRefreshBtn && !phoneAppRefreshBtn.disabled) {
+        if (currentView === 'twitter-feed') {
+            runTwitterGeneration('feed');
+        } else if (currentView === 'twitter-profile' && currentTwitterProfileCharacter) {
+            runTwitterGeneration('profile', currentTwitterProfileCharacter);
+        } else if (currentPhoneApp) {
+            runPhoneAppGeneration(currentPhoneApp);
+        }
         return;
     }
     const regenerateButton = event.target.closest('#wp-regenerate-button');
@@ -1118,7 +1148,8 @@ function showScreen(view) {
         title.textContent = 'Home';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         const flavorAppsEnabled = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
-        renderAppGridScreen(screenBody, { flavorAppsEnabled });
+        const athelEnabled = context.characters.some(c => c.name === 'Aethel');
+        renderAppGridScreen(screenBody, { flavorAppsEnabled, athelEnabled });
         return;
     }
 
@@ -1144,6 +1175,43 @@ function showScreen(view) {
         const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
         if (isStale && !phoneAppGeneratingIds.has(currentPhoneApp)) {
             runPhoneAppGeneration(currentPhoneApp);
+        }
+        return;
+    }
+
+    if (view === 'twitter-feed') {
+        title.textContent = 'Twitter';
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
+        rerenderTwitterScreenIfVisible('feed');
+        const entry = getPhoneAppContent(settings, context.chatId, twitterCacheKey('feed'));
+        const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
+        if (isStale && !twitterGeneratingKeys.has(twitterCacheKey('feed'))) {
+            runTwitterGeneration('feed');
+        }
+        return;
+    }
+
+    if (view === 'twitter-following') {
+        title.textContent = 'Following';
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
+        const portraitMap = buildPortraitMap(context.characters, WEYLAND_ROSTER.map(c => c.name), context.getThumbnailUrl);
+        renderTwitterFollowingScreen(screenBody, { roster: WEYLAND_ROSTER, portraitMap });
+        return;
+    }
+
+    if (view === 'twitter-profile') {
+        if (!currentTwitterProfileCharacter) {
+            showScreen('twitter-following');
+            return;
+        }
+        title.textContent = currentTwitterProfileCharacter;
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
+        rerenderTwitterScreenIfVisible('profile', currentTwitterProfileCharacter);
+        const cacheKey = twitterCacheKey('profile', currentTwitterProfileCharacter);
+        const entry = getPhoneAppContent(settings, context.chatId, cacheKey);
+        const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
+        if (isStale && !twitterGeneratingKeys.has(cacheKey)) {
+            runTwitterGeneration('profile', currentTwitterProfileCharacter);
         }
         return;
     }
