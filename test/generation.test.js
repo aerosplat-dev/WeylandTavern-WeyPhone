@@ -235,3 +235,45 @@ test('applyMacroSubstitution returns an empty string for empty/undefined content
     assert.equal(applyMacroSubstitution({ substituteParams: fakeSubstituteParams, content: undefined, userName: 'Ava', charName: 'Rosa' }), '');
     assert.equal(called, false);
 });
+
+// Mirrors runPhoneAppGeneration's own call sequence in index.js: buildMessages() first, then
+// applyMacroSubstitution() is applied to messages[0] (system prompt) and messages[messages.length
+// - 1] (the trailing user message, which is where PHONE_APP_PROMPTS[appKey]'s embedded
+// {{user}}/{{getvar::...}} roster tokens actually live). index.js's runPhoneAppGeneration itself
+// isn't exported/unit-testable (same constraint as generateReply/generateMemory elsewhere in this
+// file), so this test locks in the composed buildMessages + applyMacroSubstitution behavior the
+// fix depends on rather than exercising runPhoneAppGeneration directly.
+test('buildMessages + applyMacroSubstitution resolves real macros in both the system prompt and the trailing user message, matching runPhoneAppGeneration', () => {
+    const fakeSubstituteParams = (content, name1, name2) => content
+        .replaceAll('{{user}}', name1)
+        .replaceAll('{{char}}', name2)
+        .replaceAll('{{getvar::MCY-2}}', 'Karmen bio text');
+
+    const messages = buildMessages({
+        systemPromptText: 'System prompt for {{char}}, greeting {{user}}.',
+        history: [],
+        userMessage: 'Roster: {{user}} met Karmen. Bio: {{getvar::MCY-2}}.',
+    });
+
+    const userName = 'Ava';
+    const charName = 'Rosa';
+    messages[0].content = applyMacroSubstitution({
+        substituteParams: fakeSubstituteParams,
+        content: messages[0].content,
+        userName,
+        charName,
+    });
+    if (messages.length > 1) {
+        const lastMessage = messages[messages.length - 1];
+        lastMessage.content = applyMacroSubstitution({
+            substituteParams: fakeSubstituteParams,
+            content: lastMessage.content,
+            userName,
+            charName,
+        });
+    }
+
+    assert.equal(messages[0].content, 'System prompt for Rosa, greeting Ava.');
+    assert.equal(messages[messages.length - 1].content, 'Roster: Ava met Karmen. Bio: Karmen bio text.');
+    assert.ok(!messages.some(m => m.content.includes('{{user}}') || m.content.includes('{{getvar::')));
+});

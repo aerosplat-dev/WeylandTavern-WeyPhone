@@ -262,6 +262,30 @@ async function runPhoneAppGeneration(appKey) {
             userMessage: PHONE_APP_PROMPTS[appKey],
         });
 
+        // Same real-macro resolution as generateReply's system prompt and generateMemory's
+        // opening message — resolves {{user}}, {{getvar::...}}, etc. in both the system prompt
+        // (which may carry macros via resolved.systemPrompt/personalityText) and the final
+        // user message (PHONE_APP_PROMPTS[appKey], which embeds real {{user}}/{{getvar::MCY-2}}
+        // tokens in its roster content). Guarded against double-substituting the same string
+        // twice in the (not normally reachable) case where buildMessages produced only one
+        // message total.
+        const userName = context.name1 || 'User';
+        messages[0].content = applyMacroSubstitution({
+            substituteParams: context.substituteParams,
+            content: messages[0].content,
+            userName,
+            charName: mainCharacter.name,
+        });
+        if (messages.length > 1) {
+            const lastMessage = messages[messages.length - 1];
+            lastMessage.content = applyMacroSubstitution({
+                substituteParams: context.substituteParams,
+                content: lastMessage.content,
+                userName,
+                charName: mainCharacter.name,
+            });
+        }
+
         const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
         const profileId = resolveProfileId(settings, activeProfileId);
         const result = await sendMessage({
