@@ -2,9 +2,9 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat } from './lib/generation.js';
-import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions } from './lib/panel.js';
+import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap } from './lib/portraits.js';
@@ -18,7 +18,6 @@ let currentView = 'home'; // 'home' | 'contacts' | 'conversation' | 'memory'
 let currentConversationId = null;
 let editingMessageIndex = -1;
 let editingMemoryId = null;
-let tetheredMode = false;
 let selectMode = false;
 const selectedMessageIndices = new Set();
 const generatingConversationIds = new Set();
@@ -65,13 +64,6 @@ async function resolveCharacterPrompt(context, character) {
 }
 
 async function resolveWorldInfo(context, history) {
-    if (tetheredMode) {
-        return resolveWorldInfoTethered({
-            getWorldInfoPrompt: context.getWorldInfoPrompt,
-            history,
-            maxContext: context.maxContext ?? 4096,
-        });
-    }
     const personaLorebookName = context.powerUserSettings?.persona_description_lorebook || '';
     return resolveWorldInfoUntethered({
         loadWorldInfo: context.loadWorldInfo,
@@ -773,6 +765,8 @@ function showScreen(view) {
     const isTyping = generatingConversationIds.has(currentConversationId);
     renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState());
     updateRegenerateEnabled(conversation);
+    const tetheredCheckbox = document.getElementById('wp-tethered-checkbox');
+    if (tetheredCheckbox) tetheredCheckbox.checked = conversation.tethered;
 }
 
 // SillyTavern's mobile CSS sets `body { position: fixed; overflow: hidden; }`, which breaks
@@ -836,10 +830,12 @@ function initPanel() {
     backButton.addEventListener('click', () => showScreen('conversation'));
     composeButton.addEventListener('click', () => showScreen('contacts'));
 
-    // Markup/CSS-only restyle (toggle switch) — this listener and everything downstream of
-    // tetheredMode is unchanged from milestone 1/2.
     document.getElementById('wp-tethered-checkbox').addEventListener('change', (event) => {
-        tetheredMode = event.target.checked;
+        if (!currentConversationId) return;
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        setTetheredSettings(settings, currentConversationId, { tethered: event.target.checked });
+        context.saveSettingsDebounced();
     });
 
     // Closes the Regenerate popup menu on any click outside it — the menu's own toggle/item
