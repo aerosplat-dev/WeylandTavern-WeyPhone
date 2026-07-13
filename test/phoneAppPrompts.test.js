@@ -79,3 +79,10 @@ test('discord and yikyak do NOT include the WEYLAND_LOCATIONS list (location-gro
     assert.doesNotMatch(PHONE_APP_PROMPTS.discord, /kemeticism/);
     assert.doesNotMatch(PHONE_APP_PROMPTS.yikyak, /kemeticism/);
 });
+
+test('discord and yikyak prompts still contain the full roster text after the weylandRoster refactor', () => {
+    assert.ok(PHONE_APP_PROMPTS.discord.includes('Blake [@codewolf]'));
+    assert.ok(PHONE_APP_PROMPTS.discord.includes('Warren [@lovingnotes]'));
+    assert.ok(PHONE_APP_PROMPTS.yikyak.includes('Blake [@codewolf]'));
+    assert.ok(PHONE_APP_PROMPTS.yikyak.includes('Warren [@lovingnotes]'));
+});
