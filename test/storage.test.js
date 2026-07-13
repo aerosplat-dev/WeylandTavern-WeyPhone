@@ -6,6 +6,7 @@ import {
     appendMessage,
     editMessage,
     deleteMessage,
+    deleteMessages,
     deleteConversation,
     getAllConversationSummaries,
     migrateLegacyConversations,
@@ -19,6 +20,9 @@ import {
     countExchangesSince,
     migrateMemoryFields,
     getMemoryWindow,
+    getLastGeneratedMemory,
+    DEFAULT_MEMORY_PRIMARY_MODEL,
+    DEFAULT_MEMORY_BACKUP_MODEL,
 } from '../lib/storage.js';
 
 test('createConversation creates a conversation with a generated id and empty messages', () => {
@@ -115,6 +119,36 @@ test('deleteMessage is a no-op for an out-of-range index or unknown conversation
     assert.equal(deleteMessage(settings, 'nonexistent', 0), undefined);
 });
 
+test('deleteMessages removes all given indices in one pass', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    appendMessage(settings, conversation.id, { role: 'user', content: 'a' });
+    appendMessage(settings, conversation.id, { role: 'assistant', content: 'b' });
+    appendMessage(settings, conversation.id, { role: 'user', content: 'c' });
+    appendMessage(settings, conversation.id, { role: 'assistant', content: 'd' });
+    deleteMessages(settings, conversation.id, [0, 2]);
+    assert.deepEqual(getConversation(settings, conversation.id).messages, [
+        { role: 'assistant', content: 'b' }, { role: 'assistant', content: 'd' },
+    ]);
+});
+
+test('deleteMessages is order-independent (descending, ascending, unsorted indices all work)', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    for (const c of ['a', 'b', 'c', 'd', 'e']) appendMessage(settings, conversation.id, { role: 'user', content: c });
+    deleteMessages(settings, conversation.id, [3, 0, 1]);
+    assert.deepEqual(getConversation(settings, conversation.id).messages.map(m => m.content), ['c', 'e']);
+});
+
+test('deleteMessages is a no-op for an empty index list or unknown conversation', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, 'Rosa');
+    appendMessage(settings, conversation.id, { role: 'user', content: 'only message' });
+    deleteMessages(settings, conversation.id, []);
+    assert.equal(getConversation(settings, conversation.id).messages.length, 1);
+    assert.equal(deleteMessages(settings, 'nonexistent', [0]), undefined);
+});
+
 test('deleteConversation removes the conversation entirely', () => {
     const settings = { conversations: {} };
     const conversation = createConversation(settings, 'Rosa');
@@ -175,6 +209,8 @@ test('createConversation sets default memory fields on a new conversation', () =
     assert.equal(conversation.memoryThreshold, 100);
     assert.equal(conversation.memoryConnectionProfileId, '');
     assert.equal(conversation.lastMemoryMessageIndex, 0);
+    assert.equal(conversation.memoryPrimaryModel, DEFAULT_MEMORY_PRIMARY_MODEL);
+    assert.equal(conversation.memoryBackupModel, DEFAULT_MEMORY_BACKUP_MODEL);
 });
 
 test('createMemory adds a pinned-by-default memory and returns it', () => {
@@ -267,6 +303,10 @@ test('setMemorySettings partially updates only the provided fields', () => {
     setMemorySettings(settings, conversation.id, { memoryConnectionProfileId: 'profile-1' });
     assert.equal(conversation.memoryThreshold, 50);
     assert.equal(conversation.memoryConnectionProfileId, 'profile-1');
+    setMemorySettings(settings, conversation.id, { memoryPrimaryModel: 'model-a', memoryBackupModel: 'model-b' });
+    assert.equal(conversation.memoryPrimaryModel, 'model-a');
+    assert.equal(conversation.memoryBackupModel, 'model-b');
+    assert.equal(conversation.memoryThreshold, 50);
 });
 
 test('countExchangesSince counts only role:user entries from the given index onward', () => {
@@ -290,6 +330,8 @@ test('migrateMemoryFields backfills missing memory fields on a pre-milestone-5 c
     assert.equal(conversation.memoryThreshold, 100);
     assert.equal(conversation.memoryConnectionProfileId, '');
     assert.equal(conversation.lastMemoryMessageIndex, 0);
+    assert.equal(conversation.memoryPrimaryModel, DEFAULT_MEMORY_PRIMARY_MODEL);
+    assert.equal(conversation.memoryBackupModel, DEFAULT_MEMORY_BACKUP_MODEL);
 });
 
 test('migrateMemoryFields does not overwrite existing memory data', () => {
@@ -424,4 +466,25 @@ test('getMemoryWindow computed end is stable even if the conversation grows afte
     // onto `window` (e.g. awaiting an LLM call) — window.end must NOT reflect this later growth.
     conversation.messages.push({ role: 'user', content: 'c' }, { role: 'assistant', content: 'd' });
     assert.equal(window.end, 2);
+});
+
+test('getLastGeneratedMemory returns the most recent memory that has a sourceRange', () => {
+    const conversation = {
+        memories: [
+            { id: 'mem_1', content: 'first', createdAt: 1, pinned: true, sourceRange: { from: 0, to: 2 } },
+            { id: 'mem_2', content: 'manual', createdAt: 3, pinned: true, sourceRange: null },
+            { id: 'mem_3', content: 'second', createdAt: 2, pinned: true, sourceRange: { from: 2, to: 4 } },
+        ],
+    };
+    const result = getLastGeneratedMemory(conversation);
+    assert.equal(result.id, 'mem_3');
+});
+
+test('getLastGeneratedMemory returns null when there are no auto-generated memories', () => {
+    const conversation = { memories: [{ id: 'mem_1', content: 'manual', createdAt: 1, pinned: true, sourceRange: null }] };
+    assert.equal(getLastGeneratedMemory(conversation), null);
+});
+
+test('getLastGeneratedMemory returns null for a conversation with no memories', () => {
+    assert.equal(getLastGeneratedMemory({ memories: [] }), null);
 });

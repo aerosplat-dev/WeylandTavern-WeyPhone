@@ -373,8 +373,8 @@
 
 .wp-message {
     max-width: 80%;
-    padding: 6px 10px;
-    border-radius: 12px;
+    padding: 8px 12px;
+    border-radius: 18px;
     word-wrap: break-word;
     display: flex;
     align-items: flex-end;
@@ -445,14 +445,39 @@
 
 .wp-message.wp-user {
     align-self: flex-end;
+    /* A raw --SmartThemeQuoteColor is tuned to be a bright accent for small inline text on ST's
+       own dark surfaces, not a solid bubble fill — pairing it with white text (plus ST's global
+       `* { text-shadow }` glow, which is calibrated for light text on dark backgrounds) reads as
+       muddy, low-contrast white-on-yellow/gold on themes with a bright quote color. Blending it
+       into the same dark tint the char bubble already uses keeps the accent recognizable as "the
+       sent bubble" while staying a dark surface, so the shared --SmartThemeBodyColor text (used
+       everywhere else in WeyPhone) stays legible without a separate color decision per bubble.
+       Flat fallback first for browsers without color-mix() support; color-mix() overrides it. */
     background: var(--SmartThemeQuoteColor, #2b5278);
-    color: #fff;
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #2b5278) 35%, var(--SmartThemeChatTintColor, #333) 65%);
+    color: var(--SmartThemeBodyColor, #fff);
+    text-shadow: none;
 }
 
 .wp-message.wp-char {
     align-self: flex-start;
     background: var(--SmartThemeChatTintColor, #333);
     color: var(--SmartThemeBodyColor, #fff);
+}
+
+.wp-message-select-checkbox {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    /* Purely a visual indicator of the bubble's own selected state (the bubble itself is the
+       click target, delegated at the caller) — not an independently interactive control. */
+    pointer-events: none;
+}
+
+.wp-message-selected {
+    outline: 2px solid var(--SmartThemeQuoteColor, #2b5278);
+    outline-offset: 1px;
 }
 
 #wp-input-row {
@@ -462,8 +487,49 @@
     gap: 6px;
 }
 
+#wp-select-actions {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    border-top: 1px solid var(--SmartThemeBorderColor, #333);
+    gap: 8px;
+}
+
+#wp-select-count {
+    flex: 1;
+    color: var(--SmartThemeEmColor, #aaa);
+    font-size: 13px;
+    text-align: center;
+}
+
+#wp-select-delete {
+    background: var(--SmartThemeQuoteColor, #a33);
+}
+
+#wp-select-delete:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Both rows above declare `display: flex` unconditionally (an ID selector), which otherwise beats
+   the browser's default `[hidden] { display: none }` rule (lower specificity) — without this,
+   toggling the `hidden` property from JS (see updateSelectModeUI in index.js) would have no
+   visible effect and both rows would stay on screen at once. */
+#wp-input-row[hidden],
+#wp-select-actions[hidden] {
+    display: none;
+}
+
 #wp-input {
     flex: 1;
+    background: var(--SmartThemeBlurTintColor, #1a1a1a);
+    color: var(--SmartThemeBodyColor, #fff);
+    border: 1px solid var(--SmartThemeBorderColor, #333);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: inherit;
+    box-sizing: border-box;
 }
 
 .wp-typing-dots {
@@ -661,4 +727,20 @@
     padding: 6px;
     font-family: inherit;
     font-size: 13px;
+}
+
+#wp-memory-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 4px;
+}
+
+#wp-memory-actions .menu_button {
+    flex: 1;
+    font-size: 12px;
+}
+
+#wp-memory-actions .menu_button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }

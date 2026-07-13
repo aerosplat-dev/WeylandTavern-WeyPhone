@@ -1,7 +1,7 @@
 // test/memoryGeneration.test.js
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMemoryGenerationMessages, joinMemoriesForInjection } from '../lib/memoryGeneration.js';
+import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from '../lib/memoryGeneration.js';
 
 test('buildMemoryGenerationMessages returns a system+user message pair', () => {
     const windowMessages = [
@@ -76,4 +76,82 @@ test('joinMemoriesForInjection wraps memory content in a LONG TERM MEMORY block'
 test('joinMemoriesForInjection preserves memory order', () => {
     const result = joinMemoriesForInjection([{ content: 'first' }, { content: 'second' }]);
     assert.ok(result.indexOf('first') < result.indexOf('second'));
+});
+
+test('joinMemoriesForInjection clarifies that a memory resembling the current scene already happened', () => {
+    const result = joinMemoriesForInjection([{ content: 'x' }]);
+    assert.match(result, /ALREADY HAPPENED/);
+    assert.match(result, /source of truth/);
+    assert.match(result, /not instructions for what should happen next/);
+});
+
+test('joinMemoriesForInjection does not claim keyword-similarity retrieval (WeyPhone injects every pinned memory unconditionally, unlike LTM)', () => {
+    const result = joinMemoriesForInjection([{ content: 'x' }]);
+    assert.doesNotMatch(result, /keyword similarity/i);
+});
+
+test('sendMemoryRequest calls sendRequest with the primary model and returns its result on success', async () => {
+    const calls = [];
+    const sendRequest = async (profileId, messages, model) => {
+        calls.push({ profileId, messages, model });
+        return 'primary result';
+    };
+    const result = await sendMemoryRequest({
+        sendRequest, profileId: 'profile-1', messages: [{ role: 'user', content: 'x' }],
+        primaryModel: 'gemini-3-pro-preview', backupModel: 'glm-4.7',
+    });
+    assert.equal(result, 'primary result');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].model, 'gemini-3-pro-preview');
+});
+
+test('sendMemoryRequest falls back to the backup model if the primary call throws', async () => {
+    const calls = [];
+    const sendRequest = async (profileId, messages, model) => {
+        calls.push(model);
+        if (model === 'gemini-3-pro-preview') throw new Error('primary failed');
+        return 'backup result';
+    };
+    const result = await sendMemoryRequest({
+        sendRequest, profileId: 'profile-1', messages: [],
+        primaryModel: 'gemini-3-pro-preview', backupModel: 'glm-4.7',
+    });
+    assert.equal(result, 'backup result');
+    assert.deepEqual(calls, ['gemini-3-pro-preview', 'glm-4.7']);
+});
+
+test('sendMemoryRequest throws the primary error if there is no backup model configured', async () => {
+    const sendRequest = async () => { throw new Error('primary failed'); };
+    await assert.rejects(
+        sendMemoryRequest({ sendRequest, profileId: 'profile-1', messages: [], primaryModel: 'gemini-3-pro-preview', backupModel: '' }),
+        /primary failed/,
+    );
+});
+
+test('sendMemoryRequest throws if both primary and backup calls fail', async () => {
+    const sendRequest = async (profileId, messages, model) => { throw new Error(`${model} failed`); };
+    await assert.rejects(
+        sendMemoryRequest({ sendRequest, profileId: 'profile-1', messages: [], primaryModel: 'gemini-3-pro-preview', backupModel: 'glm-4.7' }),
+        /glm-4\.7 failed/,
+    );
+});
+
+test('sendMemoryRequest throws without calling sendRequest when there is no Connection Profile', async () => {
+    let called = false;
+    const sendRequest = async () => { called = true; };
+    await assert.rejects(
+        sendMemoryRequest({ sendRequest, profileId: '', messages: [], primaryModel: 'gemini-3-pro-preview' }),
+        /No Connection Profile/,
+    );
+    assert.equal(called, false);
+});
+
+test('sendMemoryRequest throws without calling sendRequest when there is no primary model configured', async () => {
+    let called = false;
+    const sendRequest = async () => { called = true; };
+    await assert.rejects(
+        sendMemoryRequest({ sendRequest, profileId: 'profile-1', messages: [], primaryModel: '' }),
+        /No primary model/,
+    );
+    assert.equal(called, false);
 });

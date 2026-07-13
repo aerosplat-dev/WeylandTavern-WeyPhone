@@ -2,7 +2,7 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat } from './lib/generation.js';
 import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
@@ -10,7 +10,7 @@ import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap } from './lib/portraits.js';
 import { parseReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
-import { buildMemoryGenerationMessages, joinMemoriesForInjection } from './lib/memoryGeneration.js';
+import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
@@ -19,6 +19,8 @@ let currentConversationId = null;
 let editingMessageIndex = -1;
 let editingMemoryId = null;
 let tetheredMode = false;
+let selectMode = false;
+const selectedMessageIndices = new Set();
 const generatingConversationIds = new Set();
 // Separate, deliberately invisible tracking for the background memory-summarization job — never
 // touches generatingConversationIds, never shows a typing indicator, never disables Regenerate.
@@ -89,13 +91,17 @@ function updateRegenerateEnabled(conversation) {
     setRegenerateEnabled(button, hasRegeneratable && !isGenerating);
 }
 
+function getSelectState() {
+    return { active: selectMode, selectedIndices: selectedMessageIndices };
+}
+
 function rerenderConversationMessages() {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, currentConversationId);
     if (!conversation) return;
     const isTyping = generatingConversationIds.has(currentConversationId);
-    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping);
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState());
     updateRegenerateEnabled(conversation);
 }
 
@@ -108,11 +114,28 @@ function rerenderIfStillViewing(conversationId, messages) {
     const messagesEl = document.getElementById('wp-messages');
     if (!messagesEl) return;
     const isTyping = generatingConversationIds.has(conversationId);
-    renderMessages(messagesEl, messages, editingMessageIndex, isTyping);
+    renderMessages(messagesEl, messages, editingMessageIndex, isTyping, getSelectState());
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, conversationId);
     if (conversation) updateRegenerateEnabled(conversation);
+}
+
+// Toggles between the normal #wp-input-row and the #wp-select-actions bar, and (while active)
+// keeps the selected-count label and Delete button's disabled state in sync. Called after every
+// selection change and on entering/exiting select mode.
+function updateSelectModeUI() {
+    const inputRow = document.getElementById('wp-input-row');
+    const selectActions = document.getElementById('wp-select-actions');
+    if (inputRow) inputRow.hidden = selectMode;
+    if (selectActions) selectActions.hidden = !selectMode;
+    if (selectMode) {
+        const countEl = document.getElementById('wp-select-count');
+        const deleteBtn = document.getElementById('wp-select-delete');
+        if (countEl) countEl.textContent = `${selectedMessageIndices.size} selected`;
+        if (deleteBtn) deleteBtn.disabled = selectedMessageIndices.size === 0;
+    }
+    rerenderConversationMessages();
 }
 
 // Shared by showScreen('home') and refreshVisibleScreen()'s home branch — builds the Home list's
@@ -153,23 +176,41 @@ function rerenderMemoryScreen() {
     if (!conversation) return;
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return;
-    renderMemoryScreen(screenBody, conversation.memories || [], editingMemoryId);
+    const isGenerating = memoryGeneratingConversationIds.has(currentConversationId);
+    const hasPendingExchanges = getMemoryWindow(conversation).messages.length > 0;
+    const hasGeneratedMemory = !!getLastGeneratedMemory(conversation);
+    renderMemoryScreen(screenBody, conversation.memories || [], editingMemoryId, {
+        isGenerating,
+        canGenerateNow: hasPendingExchanges,
+        canRegenerateLast: hasGeneratedMemory,
+    });
     const profiles = context.ConnectionManagerRequestService.getSupportedProfiles();
     populateConnectionProfileOptions(document.getElementById('wp-memory-profile-select'), profiles, conversation.memoryConnectionProfileId || '');
     document.getElementById('wp-memory-threshold-input').value = conversation.memoryThreshold || 100;
+    document.getElementById('wp-memory-primary-model-input').value = conversation.memoryPrimaryModel || '';
+    document.getElementById('wp-memory-backup-model-input').value = conversation.memoryBackupModel || '';
 }
 
-// Background, silent memory-summarization job — deliberately has no visible effect beyond the
-// memory eventually appearing in the Memory view once saveSettingsDebounced() flushes. Never
-// shows a toastr, never participates in the typing indicator or Regenerate's disabled state, per
-// the design spec's explicit "no UI indicator" requirement.
+// Background memory-summarization job. Silent (no toastr) when auto-triggered by generateReply's
+// threshold check, per the design spec's original "no UI indicator" requirement — but a manual
+// trigger (Generate Now / Regenerate Last, both user-initiated clicks) passes `silent: false` to
+// get explicit success/failure feedback, since a user who just clicked a button expects to see
+// something happen. Never participates in the typing indicator or Regenerate's disabled state
+// either way — those stay tied exclusively to generatingConversationIds.
+//
+// `forcedWindow`/`replaceMemoryId` support "Regenerate last memory": re-run generation over an
+// EXISTING memory's original sourceRange and overwrite its content in place, rather than
+// summarizing new territory. This deliberately does not touch lastMemoryMessageIndex — the
+// window being regenerated was already summarized once, so the next-memory trigger boundary
+// shouldn't move just because a past memory got redone.
 //
 // generatingConversationIds.add()/refreshVisibleScreen()-style pattern applies here too: the
 // memoryGeneratingConversationIds.add() call MUST stay inside this try block — this bug class
 // (a tracking-set mutation placed before try, leaking a stuck entry if anything before try
 // throws) has already recurred three times in this project via a plan's own example code
 // (milestones 2, 3, 4's final/task reviews). Keep it as the first statement inside try.
-async function generateMemory(conversationId, conversation, context, settings) {
+async function generateMemory(conversationId, conversation, context, settings, options = {}) {
+    const { silent = true, forcedWindow = null, replaceMemoryId = null } = options;
     if (memoryGeneratingConversationIds.has(conversationId)) return;
     const character = context.characters.find(c => c.name === conversation.charName);
     if (!character) return;
@@ -178,8 +219,14 @@ async function generateMemory(conversationId, conversation, context, settings) {
 
     try {
         memoryGeneratingConversationIds.add(conversationId);
+        rerenderMemoryScreen();
+        const window = forcedWindow ?? getMemoryWindow(conversation);
+        if (window.messages.length === 0) {
+            if (!silent) toastr.info('Nothing new to summarize since the last memory.', 'WeyPhone');
+            return;
+        }
+
         const personalityText = applySpecialCase(character.name, resolvePersonalityText(personalityConfig), {});
-        const window = getMemoryWindow(conversation);
         const userName = context.name1 || 'User';
         const messages = buildMemoryGenerationMessages({
             charName: character.name,
@@ -191,25 +238,37 @@ async function generateMemory(conversationId, conversation, context, settings) {
 
         const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
         const profileId = resolveProfileId({ connectionProfileId: conversation.memoryConnectionProfileId }, activeProfileId);
-        const result = await sendMessage({
-            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_MEMORY_MAX_TOKENS),
+        const result = await sendMemoryRequest({
+            sendRequest: (id, msgs, model) => context.ConnectionManagerRequestService.sendRequest(
+                id, msgs, DEFAULT_MEMORY_MAX_TOKENS, undefined, model ? { model } : {},
+            ),
             profileId,
             messages,
+            primaryModel: conversation.memoryPrimaryModel,
+            backupModel: conversation.memoryBackupModel,
         });
 
         const memoryText = typeof result === 'string' ? result : (result?.content ?? '');
         if (memoryText.trim()) {
-            createMemory(settings, conversationId, memoryText.trim(), {
-                sourceRange: { from: window.start, to: window.end },
-            });
-            conversation.lastMemoryMessageIndex = window.end;
+            if (replaceMemoryId) {
+                editMemory(settings, conversationId, replaceMemoryId, memoryText.trim());
+            } else {
+                createMemory(settings, conversationId, memoryText.trim(), {
+                    sourceRange: { from: window.start, to: window.end },
+                });
+                conversation.lastMemoryMessageIndex = window.end;
+            }
             context.saveSettingsDebounced();
-            rerenderMemoryScreen();
+            if (!silent) toastr.success(replaceMemoryId ? 'Memory regenerated.' : 'Memory created.', 'WeyPhone');
+        } else if (!silent) {
+            toastr.warning('The model returned an empty memory.', 'WeyPhone');
         }
     } catch (error) {
         console.error(`[${MODULE_NAME}] Memory generation failed:`, error);
+        if (!silent) toastr.error(error.message, 'WeyPhone');
     } finally {
         memoryGeneratingConversationIds.delete(conversationId);
+        rerenderMemoryScreen();
     }
 }
 
@@ -233,6 +292,10 @@ async function generateReply(conversationId, conversation, context, settings) {
         generatingConversationIds.add(conversationId);
         refreshVisibleScreen();
         const resolved = await resolveCharacterPrompt(context, character);
+        // Memories are purely additive, matching the real platform's own Weyland-LTM behavior
+        // (confirmed by reading its demoteExcessLTMs: pin/unpin only toggles a World Info entry's
+        // constant/vectorized flags, it never touches the chat array) — raw history is never
+        // trimmed just because a memory now also covers that ground.
         const historyForScan = conversation.messages.slice(0, -1);
         const worldInfo = await resolveWorldInfo(context, historyForScan);
         const pinnedMemories = getPinnedMemories(settings, conversationId);
@@ -347,6 +410,48 @@ function closeRegenerateMenu() {
     if (menu) menu.hidden = true;
 }
 
+function handleEnterSelectMode() {
+    selectMode = true;
+    selectedMessageIndices.clear();
+    editingMessageIndex = -1;
+    updateSelectModeUI();
+}
+
+function handleExitSelectMode() {
+    selectMode = false;
+    selectedMessageIndices.clear();
+    updateSelectModeUI();
+}
+
+// Matches stock SillyTavern's own bulk-delete selection model exactly (see script.js's delegated
+// `.mes` click handler under is_delete_mode): clicking a message is not an independent toggle —
+// it clears any prior selection and selects that message plus everything after it, through the
+// end of the conversation. There is no way to select an out-of-order/discontiguous set of
+// messages, and no way to select anything before the clicked message; only a fresh anchor click
+// (or Cancel) changes the selection.
+function handleSelectFromIndex(index) {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, currentConversationId);
+    if (!conversation) return;
+    selectedMessageIndices.clear();
+    for (let i = index; i < conversation.messages.length; i++) {
+        selectedMessageIndices.add(i);
+    }
+    updateSelectModeUI();
+}
+
+function handleBulkDeleteMessages() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    if (!currentConversationId || selectedMessageIndices.size === 0) return;
+    deleteMessages(settings, currentConversationId, selectedMessageIndices);
+    context.saveSettingsDebounced();
+    selectMode = false;
+    selectedMessageIndices.clear();
+    updateSelectModeUI();
+}
+
 function handleAddMemory() {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
@@ -376,6 +481,37 @@ function handleConfirmMemoryEdit(memoryId) {
     context.saveSettingsDebounced();
     editingMemoryId = null;
     rerenderMemoryScreen();
+}
+
+async function handleGenerateMemoryNow() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    if (!currentConversationId) return;
+    const conversationId = currentConversationId;
+    const conversation = getConversation(settings, conversationId);
+    if (!conversation) return;
+    await generateMemory(conversationId, conversation, context, settings, { silent: false });
+}
+
+async function handleRegenerateLastMemory() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    if (!currentConversationId) return;
+    const conversationId = currentConversationId;
+    const conversation = getConversation(settings, conversationId);
+    if (!conversation) return;
+    const lastMemory = getLastGeneratedMemory(conversation);
+    if (!lastMemory) {
+        toastr.info('No auto-generated memory to regenerate yet.', 'WeyPhone');
+        return;
+    }
+    const { from, to } = lastMemory.sourceRange;
+    const forcedWindow = { start: from, end: to, messages: conversation.messages.slice(from, to) };
+    await generateMemory(conversationId, conversation, context, settings, {
+        silent: false,
+        forcedWindow,
+        replaceMemoryId: lastMemory.id,
+    });
 }
 
 function handleDeleteMemory(memoryId) {
@@ -429,6 +565,26 @@ function handleDeleteMessage(bubbleEl) {
 }
 
 function handleScreenBodyClick(event) {
+    // While bulk-deleting, this delegated listener handles exactly three things — cancel, delete,
+    // and toggling a bubble's selection — and nothing else (no edit, no regenerate, no nav) should
+    // be reachable, so this returns unconditionally rather than falling through to the branches below.
+    if (selectMode) {
+        const selectCancelBtn = event.target.closest('#wp-select-cancel');
+        if (selectCancelBtn) {
+            handleExitSelectMode();
+            return;
+        }
+        const selectDeleteBtn = event.target.closest('#wp-select-delete');
+        if (selectDeleteBtn) {
+            if (!selectDeleteBtn.disabled) handleBulkDeleteMessages();
+            return;
+        }
+        const selectableBubble = event.target.closest('.wp-message');
+        if (selectableBubble && selectableBubble.dataset.index !== undefined) {
+            handleSelectFromIndex(Number(selectableBubble.dataset.index));
+        }
+        return;
+    }
     const regenerateButton = event.target.closest('#wp-regenerate-button');
     if (regenerateButton) {
         if (!regenerateButton.disabled) toggleRegenerateMenu();
@@ -447,9 +603,25 @@ function handleScreenBodyClick(event) {
         showScreen('memory');
         return;
     }
+    const selectMenuItem = event.target.closest('.wp-popup-menu-item[data-action="select"]');
+    if (selectMenuItem) {
+        closeRegenerateMenu();
+        handleEnterSelectMode();
+        return;
+    }
     const memoryAddBtn = event.target.closest('#wp-memory-add-button');
     if (memoryAddBtn) {
         handleAddMemory();
+        return;
+    }
+    const memoryGenerateNowBtn = event.target.closest('#wp-memory-generate-now-button');
+    if (memoryGenerateNowBtn) {
+        if (!memoryGenerateNowBtn.disabled) handleGenerateMemoryNow();
+        return;
+    }
+    const memoryRegenerateLastBtn = event.target.closest('#wp-memory-regenerate-last-button');
+    if (memoryRegenerateLastBtn) {
+        if (!memoryRegenerateLastBtn.disabled) handleRegenerateLastMemory();
         return;
     }
     const memoryPinBtn = event.target.closest('.wp-memory-pin-btn');
@@ -522,19 +694,35 @@ function handleScreenBodyClick(event) {
     }
 }
 
+const MEMORY_SETTINGS_FIELD_IDS = [
+    'wp-memory-profile-select', 'wp-memory-threshold-input',
+    'wp-memory-primary-model-input', 'wp-memory-backup-model-input',
+];
+
 function handleScreenBodyChange(event) {
-    if (event.target.id !== 'wp-memory-profile-select' && event.target.id !== 'wp-memory-threshold-input') return;
+    if (!MEMORY_SETTINGS_FIELD_IDS.includes(event.target.id)) return;
     if (!currentConversationId) return;
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const profileId = document.getElementById('wp-memory-profile-select').value;
     const threshold = Number(document.getElementById('wp-memory-threshold-input').value) || 100;
-    setMemorySettings(settings, currentConversationId, { memoryConnectionProfileId: profileId, memoryThreshold: threshold });
+    const primaryModel = document.getElementById('wp-memory-primary-model-input').value.trim();
+    const backupModel = document.getElementById('wp-memory-backup-model-input').value.trim();
+    setMemorySettings(settings, currentConversationId, {
+        memoryConnectionProfileId: profileId,
+        memoryThreshold: threshold,
+        memoryPrimaryModel: primaryModel,
+        memoryBackupModel: backupModel,
+    });
     context.saveSettingsDebounced();
 }
 
 function showScreen(view) {
     currentView = view;
+    // Navigating anywhere (including re-entering the same conversation) exits select mode —
+    // stale selections/half-finished bulk deletes shouldn't survive a screen change.
+    selectMode = false;
+    selectedMessageIndices.clear();
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const panel = document.getElementById('wp-panel');
@@ -583,7 +771,7 @@ function showScreen(view) {
     renderConversationScreen(screenBody);
     editingMessageIndex = -1;
     const isTyping = generatingConversationIds.has(currentConversationId);
-    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping);
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState());
     updateRegenerateEnabled(conversation);
 }
 
