@@ -51,3 +51,13 @@ test('getSettings backfills memory fields on a pre-milestone-5 conversation', ()
     assert.deepEqual(conversation.memories, []);
     assert.equal(conversation.memoryThreshold, 100);
 });
+
+test('getSettings backfills tethered fields on a pre-milestone-6 conversation', () => {
+    const extensionSettings = {
+        [MODULE_NAME]: { conversations: { conv_1: { id: 'conv_1', charName: 'Rosa', messages: [], createdAt: 1, lastActive: 1 } } },
+    };
+    const settings = getSettings(extensionSettings);
+    const conversation = settings.conversations.conv_1;
+    assert.equal(conversation.tethered, false);
+    assert.equal(conversation.tetheredHistoryCap, null);
+});
