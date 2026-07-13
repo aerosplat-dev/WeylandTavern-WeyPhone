@@ -114,6 +114,11 @@ async function buildTetheredContext(context, conversation) {
 // Scans World Info against the MAIN chat's own history (not WeyPhone's texting history) — this is
 // the one-line fix to what tethered mode has actually meant since milestone 1: it already used
 // the real getWorldInfoPrompt engine, but scanned it against the wrong conversation.
+//
+// Passes context.chatMetadata through to resolveWorldInfoTethered so it can snapshot/restore
+// chatMetadata.timedWorldInfo tightly around the scan — see lib/worldInfo.js for why this is
+// needed: a real (non-dry-run) WI scan against a synthetic history still writes real sticky/
+// cooldown bookkeeping onto the shared main-chat chatMetadata object.
 async function resolveWorldInfoTetheredForMainChat(context) {
     try {
         const mainHistory = convertMainChatToMessages(context.chat);
@@ -121,6 +126,7 @@ async function resolveWorldInfoTetheredForMainChat(context) {
             getWorldInfoPrompt: context.getWorldInfoPrompt,
             history: mainHistory,
             maxContext: context.maxContext ?? 4096,
+            chatMetadata: context.chatMetadata,
         });
         return [result.worldInfoBefore, result.worldInfoAfter].filter(Boolean).join('\n\n');
     } catch {

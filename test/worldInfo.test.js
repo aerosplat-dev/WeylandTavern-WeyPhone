@@ -47,6 +47,79 @@ test('resolveWorldInfoTethered converts history into a newest-first plain string
     assert.deepEqual(result, { worldInfoBefore: 'BEFORE', worldInfoAfter: 'AFTER' });
 });
 
+// Regression test for the real, live-verified bug: getWorldInfoPrompt is called with isDryRun
+// hardcoded to false (deliberately, so the tethered view doesn't miss already-active sticky/
+// cooldown entries — see the comment on resolveWorldInfoTethered). SillyTavern's real engine
+// writes sticky/cooldown bookkeeping directly onto the shared chatMetadata.timedWorldInfo object
+// as a side effect of that non-dry-run scan, regardless of what synthetic history was scanned.
+// Simulates that real side effect via a fake getWorldInfoPrompt that mutates chatMetadata, and
+// asserts resolveWorldInfoTethered restores it afterward so a phone-app tethered scan never
+// leaves a trace on the real main chat's WI timed-effect state.
+test('resolveWorldInfoTethered restores chatMetadata.timedWorldInfo after a scan that mutates it', async () => {
+    const chatMetadata = { timedWorldInfo: { cooldown: { someKey: 5 }, sticky: {} } };
+    const fakeGetWorldInfoPrompt = async (chat, maxContext, isDryRun) => {
+        assert.equal(isDryRun, false);
+        // Simulate the real engine's checkTimedEffects/setTimedEffectOfType side effect: it
+        // mutates the live chatMetadata.timedWorldInfo object in place.
+        chatMetadata.timedWorldInfo.cooldown.someKey = 0;
+        chatMetadata.timedWorldInfo.cooldown.newlyActivatedKey = 3;
+        return { worldInfoBefore: 'BEFORE', worldInfoAfter: 'AFTER' };
+    };
+
+    await resolveWorldInfoTethered({
+        getWorldInfoPrompt: fakeGetWorldInfoPrompt,
+        history: [{ role: 'user', content: 'hello' }],
+        maxContext: 4096,
+        chatMetadata,
+    });
+
+    assert.deepEqual(chatMetadata.timedWorldInfo, { cooldown: { someKey: 5 }, sticky: {} });
+});
+
+test('resolveWorldInfoTethered restores chatMetadata.timedWorldInfo even if getWorldInfoPrompt throws', async () => {
+    const chatMetadata = { timedWorldInfo: { cooldown: { someKey: 5 } } };
+    const fakeGetWorldInfoPrompt = async () => {
+        chatMetadata.timedWorldInfo.cooldown.someKey = 0;
+        throw new Error('scan failed');
+    };
+
+    await assert.rejects(() => resolveWorldInfoTethered({
+        getWorldInfoPrompt: fakeGetWorldInfoPrompt,
+        history: [],
+        maxContext: 4096,
+        chatMetadata,
+    }));
+
+    assert.deepEqual(chatMetadata.timedWorldInfo, { cooldown: { someKey: 5 } });
+});
+
+test('resolveWorldInfoTethered deletes chatMetadata.timedWorldInfo if a scan creates it where none existed before', async () => {
+    const chatMetadata = {};
+    const fakeGetWorldInfoPrompt = async () => {
+        chatMetadata.timedWorldInfo = { cooldown: { freshlyCreated: 1 } };
+        return { worldInfoBefore: '', worldInfoAfter: '' };
+    };
+
+    await resolveWorldInfoTethered({
+        getWorldInfoPrompt: fakeGetWorldInfoPrompt,
+        history: [],
+        maxContext: 4096,
+        chatMetadata,
+    });
+
+    assert.equal(Object.prototype.hasOwnProperty.call(chatMetadata, 'timedWorldInfo'), false);
+});
+
+test('resolveWorldInfoTethered works unchanged when no chatMetadata is supplied', async () => {
+    const fakeGetWorldInfoPrompt = async () => ({ worldInfoBefore: 'BEFORE', worldInfoAfter: 'AFTER' });
+    const result = await resolveWorldInfoTethered({
+        getWorldInfoPrompt: fakeGetWorldInfoPrompt,
+        history: [],
+        maxContext: 4096,
+    });
+    assert.deepEqual(result, { worldInfoBefore: 'BEFORE', worldInfoAfter: 'AFTER' });
+});
+
 test('resolveWorldInfoUntethered scans the Weyland book and merges a persona book if provided', async () => {
     const books = {
         Weyland: { entries: { 0: { key: ['always'], content: 'Weyland lore', disable: false, constant: true } } },

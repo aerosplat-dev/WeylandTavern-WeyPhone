@@ -181,3 +181,24 @@ test('parsePhoneAppOutput returns an empty sections array (never throws) for non
     assert.deepEqual(parsePhoneAppOutput(null), { sections: [] });
     assert.deepEqual(parsePhoneAppOutput(undefined), { sections: [] });
 });
+
+// Regression test for the MARKDOWN_EMPHASIS_RE false-pairing bug: single `_`/`*` were previously
+// valid emphasis delimiters, so two unrelated single-underscore tokens in the same item text
+// (e.g. real Discord/Yik Yak usernames like "@belle_281" alongside other underscored words) got
+// cross-word false-paired, and everything between them was spliced together as if it were one
+// emphasis run — corrupting real, unrelated text. Narrowing the regex to only the double/triple
+// forms (`**`/`__`/`***`/`___`) eliminates this while still stripping genuine bold wrapping.
+test('parsePhoneAppOutput does not corrupt text containing two unrelated single-underscore tokens', () => {
+    const input = '## HEADLINES\n- shoutout to under_score and also foo_bar for the help';
+    const result = parsePhoneAppOutput(input);
+    const text = result.sections.flatMap(s => s.items).map(i => i.text).join(' ');
+    assert.equal(text, 'shoutout to under_score and also foo_bar for the help');
+});
+
+test('parsePhoneAppOutput still strips genuine **bold**-wrapped emphasis markers', () => {
+    const input = '## HEADLINES\n- **@luckypaww** posted an update';
+    const result = parsePhoneAppOutput(input);
+    const text = result.sections.flatMap(s => s.items).map(i => i.text).join(' ');
+    assert.equal(text, '@luckypaww posted an update');
+    assert.doesNotMatch(text, /\*\*/);
+});
