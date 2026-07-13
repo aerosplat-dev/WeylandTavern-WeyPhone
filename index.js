@@ -11,6 +11,7 @@ import { buildPortraitMap } from './lib/portraits.js';
 import { parseReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
+import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock } from './lib/tetheredContext.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
@@ -70,6 +71,53 @@ async function resolveWorldInfo(context, history) {
         history,
         personaLorebookName,
     });
+}
+
+// Assembles the [TETHERED VIEW] block from the CURRENTLY active main roleplay, read live at
+// generation time (no caching, no snapshot-on-toggle) — if the user switches which main chat is
+// open between two WeyPhone sends, the next tethered reply reflects whatever is active NOW.
+// Returns '' (not an error) whenever there's nothing to tether to, mirroring
+// resolveMainActiveLtmEntries's own "no book bound yet" behavior — this function must never throw,
+// since generateReply has no separate error path for "tethered assembly failed" vs "the whole
+// reply failed."
+async function buildTetheredContext(context, conversation) {
+    if (!conversation.tethered) return '';
+    if (!isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId })) return '';
+
+    const mainCharacter = context.characters[context.characterId];
+    const worldInfo = await resolveWorldInfoTetheredForMainChat(context);
+
+    const ltmSettings = context.extensionSettings['Weyland-LTM'];
+    const lastLtmMessageId = ltmSettings?.__chatState?.[context.chatId]?.lastLtmMessageId ?? -1;
+    const ltmEntries = await resolveMainActiveLtmEntries({
+        loadWorldInfo: context.loadWorldInfo,
+        chatMetadata: context.chatMetadata,
+        chatId: context.chatId,
+    });
+
+    const historySlice = resolveMainHistorySlice({
+        chat: context.chat,
+        lastLtmMessageId,
+        historyCap: conversation.tetheredHistoryCap,
+    });
+    const historyTranscript = formatMainHistoryTranscript(historySlice);
+
+    return buildTetheredViewBlock({ worldInfoText: worldInfo, ltmEntries, historyTranscript });
+}
+
+// Scans World Info against the MAIN chat's own history (not WeyPhone's texting history) — this is
+// the one-line fix to what tethered mode has actually meant since milestone 1: it already used
+// the real getWorldInfoPrompt engine, but scanned it against the wrong conversation.
+async function resolveWorldInfoTetheredForMainChat(context) {
+    const mainHistory = (context.chat || [])
+        .filter(m => !m.is_system && typeof m.mes === 'string' && m.mes.trim())
+        .map(m => ({ role: m.is_user ? 'user' : 'assistant', content: m.mes }));
+    const result = await resolveWorldInfoTethered({
+        getWorldInfoPrompt: context.getWorldInfoPrompt,
+        history: mainHistory,
+        maxContext: context.maxContext ?? 4096,
+    });
+    return [result.worldInfoBefore, result.worldInfoAfter].filter(Boolean).join('\n\n');
 }
 
 function updateRegenerateEnabled(conversation) {
@@ -292,7 +340,8 @@ async function generateReply(conversationId, conversation, context, settings) {
         const worldInfo = await resolveWorldInfo(context, historyForScan);
         const pinnedMemories = getPinnedMemories(settings, conversationId);
         const memoryBlock = joinMemoriesForInjection(pinnedMemories);
-        const worldInfoAfterWithMemory = [worldInfo.worldInfoAfter, memoryBlock]
+        const tetheredBlock = await buildTetheredContext(context, conversation);
+        const worldInfoAfterWithMemory = [worldInfo.worldInfoAfter, memoryBlock, tetheredBlock]
             .filter(section => typeof section === 'string' && section.trim().length > 0)
             .join('\n\n');
         const systemPromptText = buildSystemPrompt({
@@ -800,6 +849,24 @@ function updateTopBarOffset() {
     document.documentElement.style.setProperty('--wp-topbar-bottom', `${Math.max(bottom, 0)}px`);
 }
 
+// Re-evaluates whether a main roleplay is currently active and syncs the tethered toggle's
+// disabled state accordingly — called once on load and again every time SillyTavern's own
+// CHAT_CHANGED event fires, so switching characters/chats in the main window updates the toggle
+// live without requiring the WeyPhone panel to be closed and reopened.
+function updateTetheredToggleAvailability() {
+    const checkbox = document.getElementById('wp-tethered-checkbox');
+    if (!checkbox) return;
+    const context = SillyTavern.getContext();
+    const active = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
+    let checked = checkbox.checked;
+    if (currentConversationId) {
+        const settings = getSettings(context.extensionSettings);
+        const conversation = getConversation(settings, currentConversationId);
+        if (conversation) checked = conversation.tethered;
+    }
+    setTetheredToggleState(checkbox, { checked, disabled: !active });
+}
+
 function initPanel() {
     ensurePortal().insertAdjacentHTML('beforeend', createPanelMarkup());
 
@@ -837,6 +904,10 @@ function initPanel() {
         setTetheredSettings(settings, currentConversationId, { tethered: event.target.checked });
         context.saveSettingsDebounced();
     });
+
+    updateTetheredToggleAvailability();
+    const context = SillyTavern.getContext();
+    context.eventSource.on(context.eventTypes.CHAT_CHANGED, updateTetheredToggleAvailability);
 
     // Closes the Regenerate popup menu on any click outside it — the menu's own toggle/item
     // clicks are handled inside handleScreenBodyClick above and are excluded here since they
