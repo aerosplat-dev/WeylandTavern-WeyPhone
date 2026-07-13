@@ -2,7 +2,7 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, findOrCreateDedicatedAppConversation } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from './lib/generation.js';
 import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, setModeToggleVisible } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
@@ -892,11 +892,18 @@ function handleStartConversation(charName) {
     showScreen('conversation');
 }
 
-// Body completed in the next task (Task 8), which adds findOrCreateDedicatedAppConversation to
-// lib/storage.js. Placeholder here keeps this task's own diff syntactically valid and testable in
-// isolation; Task 8 replaces this with the real implementation.
 function openAethelConversation() {
-    toastr.info('Coming soon.', 'WeyPhone');
+    const context = SillyTavern.getContext();
+    const aethelCharacter = context.characters.find(c => c.name === 'Aethel');
+    if (!aethelCharacter) {
+        toastr.error('Aethel isn\'t installed in this SillyTavern instance.', 'WeyPhone');
+        return;
+    }
+    const settings = getSettings(context.extensionSettings);
+    const conversation = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'athel');
+    context.saveSettingsDebounced();
+    currentConversationId = conversation.id;
+    showScreen('conversation');
 }
 
 function handleDeleteConversation(id) {
@@ -1254,6 +1261,8 @@ function showScreen(view) {
     updateRegenerateEnabled(conversation);
     const tetheredCheckbox = document.getElementById('wp-tethered-checkbox');
     if (tetheredCheckbox) tetheredCheckbox.checked = conversation.tethered;
+    const modeToggleLabel = document.getElementById('wp-mode-toggle');
+    if (modeToggleLabel) setModeToggleVisible(modeToggleLabel, !conversation.isDedicatedApp);
 }
 
 // SillyTavern's mobile CSS sets `body { position: fixed; overflow: hidden; }`, which breaks
@@ -1297,12 +1306,18 @@ function updateTetheredToggleAvailability() {
     const context = SillyTavern.getContext();
     const active = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
     let checked = checkbox.checked;
+    let isDedicatedApp = false;
     if (currentConversationId) {
         const settings = getSettings(context.extensionSettings);
         const conversation = getConversation(settings, currentConversationId);
-        if (conversation) checked = conversation.tethered;
+        if (conversation) {
+            checked = conversation.tethered;
+            isDedicatedApp = !!conversation.isDedicatedApp;
+        }
     }
     setTetheredToggleState(checkbox, { checked, disabled: !active });
+    const modeToggleLabel = document.getElementById('wp-mode-toggle');
+    if (modeToggleLabel) setModeToggleVisible(modeToggleLabel, !isDedicatedApp);
 }
 
 function initPanel() {

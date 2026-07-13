@@ -23,6 +23,7 @@ import {
     getLastGeneratedMemory,
     migrateTetheredFields,
     setTetheredSettings,
+    findOrCreateDedicatedAppConversation,
     DEFAULT_MEMORY_PRIMARY_MODEL,
     DEFAULT_MEMORY_BACKUP_MODEL,
 } from '../lib/storage.js';
@@ -536,4 +537,41 @@ test('migrateTetheredFields does not overwrite existing tethered data', () => {
     const conversation = settings.conversations.conv_1;
     assert.equal(conversation.tethered, true);
     assert.equal(conversation.tetheredHistoryCap, 40);
+});
+
+test('createConversation with isDedicatedApp tags the conversation record', () => {
+    const settings = { conversations: {} };
+    const conv = createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
+    assert.equal(conv.isDedicatedApp, 'athel');
+});
+
+test('createConversation without options has no isDedicatedApp tag', () => {
+    const settings = { conversations: {} };
+    const conv = createConversation(settings, 'Blake');
+    assert.equal(conv.isDedicatedApp, undefined);
+});
+
+test('getAllConversationSummaries excludes conversations tagged with isDedicatedApp', () => {
+    const settings = { conversations: {} };
+    createConversation(settings, 'Blake');
+    createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
+    const summaries = getAllConversationSummaries(settings);
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0].charName, 'Blake');
+});
+
+test('findOrCreateDedicatedAppConversation creates one on first call, reuses it on subsequent calls', () => {
+    const settings = { conversations: {} };
+    const first = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'athel');
+    const second = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'athel');
+    assert.equal(first.id, second.id);
+    assert.equal(Object.keys(settings.conversations).length, 1);
+});
+
+test('findOrCreateDedicatedAppConversation does not match a differently-tagged or untagged conversation', () => {
+    const settings = { conversations: {} };
+    createConversation(settings, 'Aethel'); // untagged, e.g. a stray/legacy conversation
+    const found = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'athel');
+    assert.equal(Object.keys(settings.conversations).length, 2);
+    assert.equal(found.isDedicatedApp, 'athel');
 });
