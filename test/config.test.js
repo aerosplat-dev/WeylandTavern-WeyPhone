@@ -61,3 +61,9 @@ test('getSettings backfills tethered fields on a pre-milestone-6 conversation', 
     assert.equal(conversation.tethered, false);
     assert.equal(conversation.tetheredHistoryCap, null);
 });
+
+test('getSettings backfills the new phoneApps cache on pre-milestone-7 settings', () => {
+    const extensionSettings = { [MODULE_NAME]: { conversations: {} } };
+    const settings = getSettings(extensionSettings);
+    assert.deepEqual(settings.phoneApps, {});
+});
