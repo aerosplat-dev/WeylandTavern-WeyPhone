@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat } from '../lib/generation.js';
+import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from '../lib/generation.js';
 
 test('buildSystemPrompt joins non-empty sections in main->WIbefore->description->personality->scenario->WIafter order', () => {
     const result = buildSystemPrompt({
@@ -202,4 +202,36 @@ test('reconstructHistoryAsPhoneFormat preserves turn order', () => {
     ];
     const result = reconstructHistoryAsPhoneFormat(history, { charName: 'Rosa', userName: 'Ava' }, (t) => String(t));
     assert.deepEqual(result.map(r => r.content), ['Outgoing¦1¦Ava¦a', 'Incoming¦2¦Rosa¦b', 'Outgoing¦3¦Ava¦c']);
+});
+
+test('applyMacroSubstitution calls substituteParams with replaceCharacterCard forced to false', () => {
+    let capturedArgs = null;
+    const fakeSubstituteParams = (content, name1, name2, original, group, replaceCharacterCard, additionalMacro) => {
+        capturedArgs = { content, name1, name2, original, group, replaceCharacterCard, additionalMacro };
+        return 'SUBSTITUTED';
+    };
+    const result = applyMacroSubstitution({
+        substituteParams: fakeSubstituteParams,
+        content: 'Hi {{user}}, this is {{char}}.',
+        userName: 'Ava',
+        charName: 'Rosa',
+    });
+    assert.equal(result, 'SUBSTITUTED');
+    assert.deepEqual(capturedArgs, {
+        content: 'Hi {{user}}, this is {{char}}.',
+        name1: 'Ava',
+        name2: 'Rosa',
+        original: undefined,
+        group: undefined,
+        replaceCharacterCard: false,
+        additionalMacro: {},
+    });
+});
+
+test('applyMacroSubstitution returns an empty string for empty/undefined content without calling substituteParams', () => {
+    let called = false;
+    const fakeSubstituteParams = () => { called = true; return 'unused'; };
+    assert.equal(applyMacroSubstitution({ substituteParams: fakeSubstituteParams, content: '', userName: 'Ava', charName: 'Rosa' }), '');
+    assert.equal(applyMacroSubstitution({ substituteParams: fakeSubstituteParams, content: undefined, userName: 'Ava', charName: 'Rosa' }), '');
+    assert.equal(called, false);
 });

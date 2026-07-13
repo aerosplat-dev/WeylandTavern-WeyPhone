@@ -3,7 +3,7 @@ import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/charact
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings } from './lib/storage.js';
-import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat } from './lib/generation.js';
+import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from './lib/generation.js';
 import { createPanelMarkup, renderHomeScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
@@ -280,6 +280,14 @@ async function generateMemory(conversationId, conversation, context, settings, o
             userName,
             formatClockTime,
         });
+        // Same real-macro resolution as generateReply's system prompt — personalityText can
+        // itself contain macros (it comes from the same charper.js source as the main prompt).
+        messages[0].content = applyMacroSubstitution({
+            substituteParams: context.substituteParams,
+            content: messages[0].content,
+            userName,
+            charName: character.name,
+        });
 
         const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
         const profileId = resolveProfileId({ connectionProfileId: conversation.memoryConnectionProfileId }, activeProfileId);
@@ -362,12 +370,22 @@ async function generateReply(conversationId, conversation, context, settings) {
             .join('\n\n');
 
         const userName = context.name1 || 'User';
+        // Resolves every macro in the fully-assembled prompt — {{user}}, {{char}}, {{time}},
+        // {{date}}, dice rolls, etc. — via SillyTavern's own real macro engine. This covers the
+        // character's base prompt, World Info, memories, and the [TETHERED VIEW] block all at
+        // once, since they're already joined into one string by this point.
+        const substitutedSystemPromptText = applyMacroSubstitution({
+            substituteParams: context.substituteParams,
+            content: fullSystemPromptText,
+            userName,
+            charName: character.name,
+        });
         const lastMessage = conversation.messages[conversation.messages.length - 1];
         const reconstructedHistory = reconstructHistoryAsPhoneFormat(historyForScan, { charName: character.name, userName }, formatClockTime);
         const wrappedUserMessage = reconstructHistoryAsPhoneFormat([lastMessage], { charName: character.name, userName }, formatClockTime)[0].content;
 
         const messages = buildMessages({
-            systemPromptText: fullSystemPromptText,
+            systemPromptText: substitutedSystemPromptText,
             history: reconstructedHistory,
             userMessage: wrappedUserMessage,
         });

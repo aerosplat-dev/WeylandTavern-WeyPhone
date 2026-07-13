@@ -133,11 +133,19 @@ test('buildTetheredViewBlock wraps all three sections in the exact [TETHERED VIE
         historyTranscript: 'Alice: hi\nBob: hey',
     });
     assert.match(result, /^\[TETHERED VIEW\]/);
-    assert.match(result, /Below is another roleplay \{\{user\}\} is currently running, shown to you for context only — you are\nnot in it and can't act within it\. If \{\{user\}\} brings it up, react the way YOUR personality\nactually would, not generically; otherwise ignore it\./);
+    assert.match(result, /you CAN see it\nand ARE aware of what's happening in it/);
+    assert.match(result, /NOT\na character in that story and cannot act within it, and it is NOT your own conversation history/);
+    assert.match(result, /don't confuse anything below with things that actually happened between you two\./);
     assert.match(result, /Some lore\./);
     assert.match(result, /They met at the docks\./);
     assert.match(result, /Alice: hi/);
     assert.match(result, /\[END TETHERED VIEW\]$/);
+});
+
+test('buildTetheredViewBlock affirmatively states awareness rather than a defensive "ignore it" framing', () => {
+    const result = buildTetheredViewBlock({ worldInfoText: '', ltmEntries: [], historyTranscript: 'Alice: hi' });
+    assert.doesNotMatch(result, /otherwise ignore it/);
+    assert.match(result, /you CAN see it/);
 });
 
 test('buildTetheredViewBlock omits a section entirely when its input is empty', () => {
