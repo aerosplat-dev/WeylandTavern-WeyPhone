@@ -101,7 +101,9 @@
    attribute (set by index.js on every navigation) rather than scattering visibility toggling
    through JS. */
 #wp-panel[data-view="conversation"] #wp-home-button,
-#wp-panel[data-view="contacts"] #wp-home-button {
+#wp-panel[data-view="contacts"] #wp-home-button,
+#wp-panel[data-view="messages"] #wp-home-button,
+#wp-panel[data-view="phone-app"] #wp-home-button {
     display: flex;
 }
 
@@ -113,7 +115,7 @@
     display: flex;
 }
 
-#wp-panel[data-view="home"] #wp-compose-button {
+#wp-panel[data-view="messages"] #wp-compose-button {
     display: flex;
 }
 
@@ -283,6 +285,89 @@
     opacity: 0.6;
     padding: 24px 12px;
     font-size: 13px;
+}
+
+.wp-app-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    padding: 16px;
+}
+
+.wp-app-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 8px;
+    border-radius: 12px;
+    background: var(--SmartThemeBlurTintColor, #1a1a1a);
+    border: 1px solid var(--SmartThemeBorderColor, #333);
+    cursor: pointer;
+    text-align: center;
+}
+
+.wp-app-icon {
+    font-size: 28px;
+    color: var(--SmartThemeQuoteColor, #2b5278);
+}
+
+.wp-app-label {
+    font-size: 12px;
+    color: var(--SmartThemeBodyColor, #fff);
+}
+
+.wp-app-tile-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+#wp-phone-app-content {
+    padding: 8px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+}
+
+.wp-phone-app-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--SmartThemeQuoteColor, #2b5278);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.wp-phone-app-item {
+    font-size: 13px;
+    color: var(--SmartThemeBodyColor, #fff);
+    padding: 6px 0;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
+}
+
+.wp-phone-app-timestamp {
+    color: var(--SmartThemeEmColor, #aaa);
+    font-size: 11px;
+    margin-right: 6px;
+}
+
+#wp-phone-app-meta {
+    font-size: 11px;
+    color: var(--SmartThemeEmColor, #aaa);
+    text-align: center;
+    padding: 4px 0;
+}
+
+#wp-phone-app-actions {
+    display: flex;
+    justify-content: center;
+    padding: 12px;
+}
+
+#wp-phone-app-actions .menu_button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .wp-list-item {
