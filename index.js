@@ -715,7 +715,7 @@ function handleDeleteConversation(id) {
     if (currentConversationId === id) {
         currentConversationId = null;
     }
-    showScreen('home');
+    showScreen('messages');
 }
 
 function handleConfirmEdit(bubbleEl) {
@@ -975,7 +975,7 @@ function showScreen(view) {
     if (view === 'memory') {
         const conversation = getConversation(settings, currentConversationId);
         if (!conversation) {
-            showScreen('home');
+            showScreen('messages');
             return;
         }
         title.textContent = 'Memory';
@@ -988,7 +988,7 @@ function showScreen(view) {
     // view === 'conversation'
     const conversation = getConversation(settings, currentConversationId);
     if (!conversation) {
-        showScreen('home');
+        showScreen('messages');
         return;
     }
     title.textContent = conversation.charName;
