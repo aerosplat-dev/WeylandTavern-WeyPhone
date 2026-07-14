@@ -328,7 +328,6 @@
 .wp-app-tile-disabled {
     opacity: 0.4;
     cursor: not-allowed;
-    pointer-events: none;
 }
 
 #wp-phone-app-content {

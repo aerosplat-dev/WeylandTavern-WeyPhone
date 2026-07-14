@@ -982,7 +982,11 @@ function handleScreenBodyClick(event) {
         return;
     }
     const appTile = event.target.closest('.wp-app-tile');
-    if (appTile && !appTile.classList.contains('wp-app-tile-disabled')) {
+    if (appTile) {
+        if (appTile.classList.contains('wp-app-tile-disabled')) {
+            toastr.info('This app is only available when there\'s an active roleplay chat open.', 'WeyPhone');
+            return;
+        }
         const appKey = appTile.dataset.app;
         if (appKey === 'messages') {
             showScreen('messages');
