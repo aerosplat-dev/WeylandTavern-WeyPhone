@@ -1375,17 +1375,20 @@ function initPanelDrag(panel, headerEl) {
     headerEl.addEventListener('pointerup', endDrag);
     headerEl.addEventListener('pointercancel', endDrag);
 
-    // A desktop drag can leave inline style.top/style.right on the panel. If the browser window
-    // is then resized down across the mobile breakpoint while the panel is still open, those
-    // inline styles would win the cascade over the mobile media query's own top/left/right/bottom
-    // rules (inline styles always beat stylesheet rules, media query or not), visually conflicting
-    // with the full-screen sheet layout. Clear them the moment we cross into mobile width so the
-    // mobile rules take over cleanly.
+    // A desktop drag can leave inline style.top/style.right on the panel, and native CSS
+    // `resize: both` can leave inline style.width/style.height. If the browser window is then
+    // resized down across the mobile breakpoint while the panel is still open, those inline
+    // styles would win the cascade over the mobile media query's own top/left/right/bottom/
+    // width/height rules (inline styles always beat stylesheet rules, media query or not),
+    // visually conflicting with the full-screen sheet layout. Clear them the moment we cross
+    // into mobile width so the mobile rules take over cleanly.
     const mobileQuery = window.matchMedia('(max-width: 600px)');
     const clearInlinePositionOnMobile = (event) => {
         if (event.matches) {
             panel.style.removeProperty('top');
             panel.style.removeProperty('right');
+            panel.style.removeProperty('width');
+            panel.style.removeProperty('height');
         }
     };
     if (mobileQuery.addEventListener) {
