@@ -662,7 +662,21 @@ async function generateReply(conversationId, conversation, context, settings) {
         // constant/vectorized flags, it never touches the chat array) — raw history is never
         // trimmed just because a memory now also covers that ground.
         const historyForScan = conversation.messages.slice(0, -1);
-        const worldInfo = await resolveWorldInfo(context, historyForScan);
+        // Tethered mode REPLACES WeyPhone's own untethered world info with the active main
+        // roleplay's world info (resolved inside buildTetheredContext below, as part of its own
+        // [TETHERED VIEW] block) — it does not add to it. Running both scans unconditionally (as
+        // this used to do) fed the model two separate, overlapping passes over the same shared
+        // "Weyland" lorebook in one prompt — once scanned against this texting conversation, once
+        // against the main chat's real history — duplicating instructional content in a way that
+        // reads as exactly the kind of repeated override attempt a stricter model is trained to
+        // refuse. Falls back to the untethered scan when tethered but nothing is actually active
+        // to tether to (mirrors buildTetheredContext's own isMainRoleplayActive guard), so a
+        // conversation never silently ends up with zero world info.
+        const effectivelyTethered = conversation.tethered &&
+            isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
+        const worldInfo = effectivelyTethered
+            ? { worldInfoBefore: '', worldInfoAfter: '' }
+            : await resolveWorldInfo(context, historyForScan);
         const pinnedMemories = getPinnedMemories(settings, conversationId);
         const memoryBlock = joinMemoriesForInjection(pinnedMemories);
         const tetheredBlock = await buildTetheredContext(context, conversation);
