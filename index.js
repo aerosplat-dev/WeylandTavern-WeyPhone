@@ -46,6 +46,28 @@ const DEFAULT_MAX_TOKENS = 1024;
 // Memory entries are meant to be short (2-4 sentences) — a much smaller cap than regular replies.
 const DEFAULT_MEMORY_MAX_TOKENS = 256;
 
+/**
+ * Resolves the character record generateReply/generateMemory need for a WeyPhone conversation.
+ * For every normal conversation this is a real installed SillyTavern character (a plain
+ * context.characters lookup by name). Aethel is a deliberate exception: she has no standalone
+ * character card at all — her real personality/lore lives entirely as quick-reply-ext's own
+ * charper.js data (charPer.get('Aethel')), the same Weybot-sandbox mechanism the platform already
+ * uses to let Weybot roleplay as her without a real card. resolveCharacterPrompt only ever needs
+ * character.name (it reads prompt/personality content from charPer/ravs, never from the character
+ * object's own fields), and avatar resolution goes through buildPortraitMap independently (already
+ * resilient to no local character match — see lib/portraits.js), so a synthetic stub is safe
+ * everywhere a resolved character actually gets used downstream of this function.
+ * @param {{characters: Array<{name: string}>}} context
+ * @param {string} charName
+ * @returns {{name: string, avatar: string|null} | undefined}
+ */
+function resolveConversationCharacter(context, charName) {
+    const found = context.characters.find(c => c.name === charName);
+    if (found) return found;
+    if (charName === 'Aethel' && charPer.has('Aethel')) return { name: 'Aethel', avatar: null };
+    return undefined;
+}
+
 function log(...args) {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
@@ -548,7 +570,7 @@ function rerenderMemoryScreen() {
 async function generateMemory(conversationId, conversation, context, settings, options = {}) {
     const { silent = true, forcedWindow = null, replaceMemoryId = null } = options;
     if (memoryGeneratingConversationIds.has(conversationId)) return;
-    const character = context.characters.find(c => c.name === conversation.charName);
+    const character = resolveConversationCharacter(context, conversation.charName);
     if (!character) return;
     const personalityConfig = charPer.get(character.name);
     if (!personalityConfig) return;
@@ -621,7 +643,7 @@ async function generateMemory(conversationId, conversation, context, settings, o
 // prompt, builds the request (including the always-texting instructions, phone-format history,
 // and any pinned memories), sends it, and stores each extracted message from the reply.
 async function generateReply(conversationId, conversation, context, settings) {
-    const character = context.characters.find(c => c.name === conversation.charName);
+    const character = resolveConversationCharacter(context, conversation.charName);
     if (!character) {
         toastr.error(`Could not find character "${conversation.charName}" for this conversation.`, 'WeyPhone');
         return;
@@ -889,9 +911,12 @@ function handleStartConversation(charName) {
 
 function openAethelConversation() {
     const context = SillyTavern.getContext();
-    const aethelCharacter = context.characters.find(c => c.name === 'Aethel');
-    if (!aethelCharacter) {
-        toastr.error('Aethel isn\'t installed in this SillyTavern instance.', 'WeyPhone');
+    // Aethel has no standalone SillyTavern character card at all — she's never findable via
+    // context.characters, by design (see resolveConversationCharacter above). Her real
+    // availability check is whether the platform's own quick-reply-ext charper.js data has her
+    // (the same Weybot-sandbox mechanism that lets Weybot roleplay as her without a real card).
+    if (!charPer.has('Aethel')) {
+        toastr.error('Aethel\'s character data isn\'t available in this SillyTavern instance.', 'WeyPhone');
         return;
     }
     const settings = getSettings(context.extensionSettings);
