@@ -114,7 +114,9 @@
     display: flex;
 }
 
-#wp-panel[data-view="memory"] #wp-back-button {
+#wp-panel[data-view="memory"] #wp-back-button,
+#wp-panel[data-view="twitter-following"] #wp-back-button,
+#wp-panel[data-view="twitter-profile"] #wp-back-button {
     display: flex;
 }
 
@@ -414,6 +416,75 @@
 }
 
 .wp-twitter-following-item .wp-list-item-snippet {
+    color: var(--SmartThemeEmColor, #aaa);
+}
+
+.wp-twitter-post {
+    display: flex;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
+}
+
+.wp-twitter-post .wp-avatar {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+}
+
+.wp-twitter-post-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.wp-twitter-post-header {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 2px;
+}
+
+.wp-twitter-post-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--SmartThemeBodyColor, #fff);
+}
+
+.wp-twitter-post-handle {
+    font-size: 12px;
+    color: var(--SmartThemeEmColor, #aaa);
+}
+
+.wp-twitter-post-text {
+    font-size: 13px;
+    color: var(--SmartThemeBodyColor, #fff);
+    line-height: 1.4;
+    margin-bottom: 6px;
+}
+
+.wp-twitter-retweet-label {
+    font-size: 11px;
+    color: var(--SmartThemeEmColor, #aaa);
+    margin-bottom: 4px;
+}
+
+.wp-twitter-retweet-body {
+    font-size: 13px;
+    color: var(--SmartThemeBodyColor, #fff);
+    line-height: 1.4;
+    border-left: 2px solid #1d9bf0;
+    padding-left: 8px;
+    margin-bottom: 6px;
+}
+
+.wp-twitter-post-stats {
+    display: flex;
+    gap: 16px;
+}
+
+.wp-twitter-stat {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
     color: var(--SmartThemeEmColor, #aaa);
 }
 
