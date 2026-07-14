@@ -4,7 +4,7 @@ import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonality
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, findOrCreateDedicatedAppConversation } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from './lib/generation.js';
-import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, setModeToggleVisible } from './lib/panel.js';
+import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, setModeToggleVisible } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap } from './lib/portraits.js';
@@ -15,6 +15,8 @@ import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySl
 import { PHONE_APP_PROMPTS } from './lib/phoneAppPrompts.js';
 import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
 import { parsePhoneAppOutput } from './lib/phoneAppFormatting.js';
+import { parseTwitterPosts } from './lib/twitterParsing.js';
+import { PSA_ACCOUNTS } from './lib/twitterPrompts.js';
 import { WEYLAND_ROSTER } from './lib/weylandRoster.js';
 import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
@@ -433,8 +435,8 @@ async function runTwitterGeneration(mode, characterName) {
         });
 
         const rawText = typeof result === 'string' ? result : (result?.content ?? '');
-        const parsed = parsePhoneAppOutput(rawText);
-        if (parsed.sections.length === 0) {
+        const parsed = parseTwitterPosts(rawText, { roster: WEYLAND_ROSTER, psaAccounts: PSA_ACCOUNTS });
+        if (parsed.posts.length === 0) {
             toastr.warning('The model did not return usable content this time.', 'WeyPhone');
             return;
         }
@@ -454,9 +456,6 @@ async function runTwitterGeneration(mode, characterName) {
     }
 }
 
-// NOTE: renderTwitterProfileScreen is added to the lib/panel.js import by Task 5. Until that
-// lands, the 'profile' branch below is a valid-syntax forward reference that will throw at
-// runtime if actually exercised — expected per this task's brief, not a bug to work around here.
 function rerenderTwitterScreenIfVisible(mode, characterName) {
     const expectedView = mode === 'feed' ? 'twitter-feed' : 'twitter-profile';
     if (currentView !== expectedView) return;
@@ -469,13 +468,9 @@ function rerenderTwitterScreenIfVisible(mode, characterName) {
     const entry = getPhoneAppContent(settings, context.chatId, cacheKey);
     const isGenerating = twitterGeneratingKeys.has(cacheKey);
     if (mode === 'feed') {
-        renderPhoneAppScreen(screenBody, {
-            appLabel: 'Twitter',
-            entry,
-            isGenerating,
-            formatRelativeTime,
-            showFollowingLink: true,
-        });
+        const authorNames = (entry?.content?.posts ?? []).map(p => p.authorName);
+        const portraitMap = buildPortraitMap(context.characters, authorNames, context.getThumbnailUrl);
+        renderTwitterFeedScreen(screenBody, { entry, isGenerating, formatRelativeTime, portraitMap });
     } else {
         const rosterEntry = WEYLAND_ROSTER.find(c => c.name === characterName);
         renderTwitterProfileScreen(screenBody, {
@@ -1347,7 +1342,15 @@ function initPanel() {
     toggleButton.addEventListener('click', () => setPanelOpen(!panel.classList.contains('wp-open')));
     closeButton.addEventListener('click', () => setPanelOpen(false));
     homeButton.addEventListener('click', () => showScreen('home'));
-    backButton.addEventListener('click', () => showScreen('conversation'));
+    backButton.addEventListener('click', () => {
+        if (currentView === 'twitter-following') {
+            showScreen('twitter-feed');
+        } else if (currentView === 'twitter-profile') {
+            showScreen('twitter-following');
+        } else {
+            showScreen('conversation');
+        }
+    });
     composeButton.addEventListener('click', () => showScreen('contacts'));
 
     document.getElementById('wp-tethered-checkbox').addEventListener('change', (event) => {
