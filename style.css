@@ -57,38 +57,14 @@
     display: flex;
 }
 
-/* Desktop-only: custom 8-direction resize + drag-to-move affordance (see initPanelResize and
-   initPanelDrag in index.js). Gated to the same 601px breakpoint the mobile full-screen-sheet
-   media query below uses on the other side, so the two behaviors never overlap. */
-@media (min-width: 601px) {
-    #wp-panel {
-        overflow: hidden;
-        min-width: 280px;
-        min-height: 320px;
-        max-width: 90vw;
-        max-height: 90vh;
-    }
-
-    #wp-panel-header {
-        cursor: move;
-    }
-
-    #wp-panel-header button,
-    #wp-panel-header input,
-    #wp-panel-header label {
-        cursor: pointer;
-    }
-
-    .wp-resize-handle {
-        display: block;
-    }
-}
-
-/* Hidden by default (mobile) — only shown inside the desktop media query above. Positioned as
-   thin strips along each edge (8px) and slightly larger squares at each corner (14px), all
-   straddling the panel's own border so they're easy to grab without needing pixel-perfect
-   precision right on the 1px border line. z-index above the header so the north-edge handle (which
-   overlaps the header's own top few pixels) still wins pointer targeting for its own thin strip. */
+/* Hidden by default (mobile) — only shown inside the desktop media query below (which sets
+   display: block on this same selector; declared here, BEFORE that media query, so that source
+   order doesn't let this base display:none win over the desktop override at equal specificity).
+   Positioned as thin strips along each edge (8px) and slightly larger squares at each corner
+   (14px), all straddling the panel's own border so they're easy to grab without needing
+   pixel-perfect precision right on the 1px border line. z-index above the header so the
+   north-edge handle (which overlaps the header's own top few pixels) still wins pointer
+   targeting for its own thin strip. */
 .wp-resize-handle {
     display: none;
     position: absolute;
@@ -121,6 +97,43 @@
 .wp-resize-nw { top: -4px; left: -4px; cursor: nwse-resize; }
 .wp-resize-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
 .wp-resize-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
+
+/* Desktop-only: custom 8-direction resize + drag-to-move affordance (see initPanelResize and
+   initPanelDrag in index.js). Gated to the same 601px breakpoint the mobile full-screen-sheet
+   media query below uses on the other side, so the two behaviors never overlap. */
+@media (min-width: 601px) {
+    #wp-panel {
+        /* NOT overflow: hidden here (even though that's the base/mobile value) — the 8 resize
+           handles above straddle #wp-panel's own border via negative top/right/bottom/left
+           offsets so they're easy to grab without pixel-perfect precision, and overflow: hidden
+           on #wp-panel would clip (both visually and for hit-testing) the ~half of each handle
+           that sits outside the border, making them unreliable/unclickable right at the border
+           pixel. Safe to leave open on desktop: #wp-screen-body already owns its own internal
+           overflow-y (or overflow: hidden for the conversation view, see below) for content
+           scrolling, so #wp-panel's own overflow was never load-bearing for content — only for
+           clipping square child corners behind the rounded border, and header/screen-body share
+           #wp-panel's own background color, so there's no visible seam either way. */
+        overflow: visible;
+        min-width: 280px;
+        min-height: 320px;
+        max-width: 90vw;
+        max-height: 90vh;
+    }
+
+    #wp-panel-header {
+        cursor: move;
+    }
+
+    #wp-panel-header button,
+    #wp-panel-header input,
+    #wp-panel-header label {
+        cursor: pointer;
+    }
+
+    .wp-resize-handle {
+        display: block;
+    }
+}
 
 #wp-panel-header {
     display: flex;
