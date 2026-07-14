@@ -1419,8 +1419,14 @@ function initPanelResize(panel) {
     let startRight = 0;
     let startWidth = 0;
     let startHeight = 0;
-    let maxWidth = 0;
-    let maxHeight = 0;
+    // Separate max ceilings per edge: 'e'/'n' additionally need to stay bounded by
+    // startRight+startWidth / startTop+startHeight (see the pointerdown comment below), but
+    // 'w'/'s' never touch newRight/newTop and must NOT share that reduced ceiling — they're
+    // bounded only by the flat viewport-relative max.
+    let maxWidthForE = 0;
+    let maxWidthForW = 0;
+    let maxHeightForN = 0;
+    let maxHeightForS = 0;
 
     panel.querySelectorAll('.wp-resize-handle').forEach((handle) => {
         const dir = handle.dataset.dir;
@@ -1438,9 +1444,13 @@ function initPanelResize(panel) {
             // Cap the growth ceiling so that even a max-extent 'e'/'n' resize can never require
             // newRight/newTop (below) to go negative to keep the opposite edge fixed — without
             // this, the Math.max(0, ...) floor on newRight/newTop would clobber a legitimately
-            // negative offset and cause the opposite edge to visibly jump/drift.
-            maxWidth = Math.min(window.innerWidth * 0.9, startRight + startWidth);
-            maxHeight = Math.min(window.innerHeight * 0.9, startTop + startHeight);
+            // negative offset and cause the opposite edge to visibly jump/drift. This constraint
+            // only applies to 'e'/'n' (they alone touch newRight/newTop); 'w'/'s' get only the
+            // flat viewport-relative ceiling since they have no opposite-edge offset to protect.
+            maxWidthForE = Math.min(window.innerWidth * 0.9, startRight + startWidth);
+            maxWidthForW = window.innerWidth * 0.9;
+            maxHeightForN = Math.min(window.innerHeight * 0.9, startTop + startHeight);
+            maxHeightForS = window.innerHeight * 0.9;
             handle.setPointerCapture(event.pointerId);
             event.preventDefault();
             // Stop this from also being seen as a header drag-to-move if a handle ever visually
@@ -1469,18 +1479,18 @@ function initPanelResize(panel) {
             // (post-clamp), not by the raw cursor delta, so the fixed opposite edge stays truly
             // fixed even when a resize hits the min/max clamp.
             if (dir.includes('e')) {
-                newWidth = Math.min(Math.max(startWidth + deltaX, MIN_WIDTH), maxWidth);
+                newWidth = Math.min(Math.max(startWidth + deltaX, MIN_WIDTH), maxWidthForE);
                 newRight = startRight - (newWidth - startWidth);
             }
             if (dir.includes('w')) {
-                newWidth = Math.min(Math.max(startWidth - deltaX, MIN_WIDTH), maxWidth);
+                newWidth = Math.min(Math.max(startWidth - deltaX, MIN_WIDTH), maxWidthForW);
             }
             if (dir.includes('n')) {
-                newHeight = Math.min(Math.max(startHeight - deltaY, MIN_HEIGHT), maxHeight);
+                newHeight = Math.min(Math.max(startHeight - deltaY, MIN_HEIGHT), maxHeightForN);
                 newTop = startTop - (newHeight - startHeight);
             }
             if (dir.includes('s')) {
-                newHeight = Math.min(Math.max(startHeight + deltaY, MIN_HEIGHT), maxHeight);
+                newHeight = Math.min(Math.max(startHeight + deltaY, MIN_HEIGHT), maxHeightForS);
             }
 
             panel.style.top = `${Math.max(0, newTop)}px`;
