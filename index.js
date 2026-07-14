@@ -52,11 +52,13 @@ const DEFAULT_MEMORY_MAX_TOKENS = 256;
  * context.characters lookup by name). Aethel is a deliberate exception: she has no standalone
  * character card at all — her real personality/lore lives entirely as quick-reply-ext's own
  * charper.js data (charPer.get('Aethel')), the same Weybot-sandbox mechanism the platform already
- * uses to let Weybot roleplay as her without a real card. resolveCharacterPrompt only ever needs
- * character.name (it reads prompt/personality content from charPer/ravs, never from the character
- * object's own fields), and avatar resolution goes through buildPortraitMap independently (already
- * resilient to no local character match — see lib/portraits.js), so a synthetic stub is safe
- * everywhere a resolved character actually gets used downstream of this function.
+ * uses to let Weybot roleplay as her without a real card. resolveCharacterPrompt reads
+ * character.name (to look up prompt/personality content in charPer/ravs) and character.description
+ * (defaulted to '' if absent, which is correct for Aethel — she has no real card to draw a
+ * description from anyway) — it never needs any other field, and avatar resolution goes through
+ * buildPortraitMap independently (already resilient to no local character match — see
+ * lib/portraits.js), so a synthetic stub is safe everywhere a resolved character actually gets used
+ * downstream of this function.
  * @param {{characters: Array<{name: string}>}} context
  * @param {string} charName
  * @returns {{name: string, avatar: string|null} | undefined}
