@@ -50,3 +50,67 @@ test('parseTwitterPosts returns empty posts for empty/garbage/non-string input',
     assert.deepEqual(parseTwitterPosts(null, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS }), { posts: [] });
     assert.deepEqual(parseTwitterPosts('garbage text with no structure', { roster: ROSTER, psaAccounts: PSA_ACCOUNTS }), { posts: [] });
 });
+
+// Regression tests for POST_LINE_RE being too strict: the original regex required the stat block
+// to be exactly "{likes:N retweets:N views:N}" with nothing but trailing whitespace, so any
+// plausible model deviation (comma-formatted numbers, a stream-truncated stat block) caused the
+// WHOLE post to silently vanish instead of just its stats defaulting.
+test('parseTwitterPosts handles comma-formatted stat numbers', () => {
+    const raw = '- [@codewolf] this one went viral somehow {likes:1,204 retweets:87 views:15,600}';
+    const result = parseTwitterPosts(raw, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
+    assert.equal(result.posts.length, 1);
+    assert.deepEqual(
+        { likes: result.posts[0].likes, retweets: result.posts[0].retweets, views: result.posts[0].views },
+        { likes: 1204, retweets: 87, views: 15600 },
+    );
+    assert.equal(result.posts[0].text, 'this one went viral somehow');
+});
+
+test('parseTwitterPosts still parses the post when the stat block is truncated (missing closing brace/fields), defaulting missing stats to 0', () => {
+    const raw = '- [@codewolf] stream got cut off right here {likes:12 retweets:3';
+    const result = parseTwitterPosts(raw, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
+    assert.equal(result.posts.length, 1);
+    assert.deepEqual(
+        { likes: result.posts[0].likes, retweets: result.posts[0].retweets, views: result.posts[0].views },
+        { likes: 12, retweets: 3, views: 0 },
+    );
+    assert.equal(result.posts[0].text, 'stream got cut off right here');
+});
+
+test('parseTwitterPosts still parses the post when the stat block is entirely missing, defaulting all stats to 0', () => {
+    const raw = '- [@codewolf] no stat block at all on this one';
+    const result = parseTwitterPosts(raw, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
+    assert.equal(result.posts.length, 1);
+    assert.deepEqual(
+        { likes: result.posts[0].likes, retweets: result.posts[0].retweets, views: result.posts[0].views },
+        { likes: 0, retweets: 0, views: 0 },
+    );
+    assert.equal(result.posts[0].text, 'no stat block at all on this one');
+});
+
+test('parseTwitterPosts still parses a well-formed post with an exact stat block (no regression)', () => {
+    const raw = '- [@codewolf] just shipped a bug fix at 3am {likes:12 retweets:2 views:340}';
+    const result = parseTwitterPosts(raw, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
+    assert.deepEqual(result.posts[0], {
+        authorName: 'Blake', handle: '@codewolf', text: 'just shipped a bug fix at 3am',
+        likes: 12, retweets: 2, views: 340, isRetweet: false,
+    });
+});
+
+// Regression test: real captured Discord output shows the model wrapping usernames in
+// "**bold**" despite the "plain markdown only" instruction (see phoneAppFormatting.js's
+// stripMarkdownEmphasis) — twitterPrompts.js issues the identical instruction, so the same
+// deviation is plausible here and previously leaked raw "**" straight into parsed post text.
+test('parseTwitterPosts strips markdown emphasis markers from post text', () => {
+    const raw = '- [@codewolf] **huge** announcement about the new dorm wifi {likes:5 retweets:1 views:88}';
+    const result = parseTwitterPosts(raw, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
+    assert.equal(result.posts[0].text, 'huge announcement about the new dorm wifi');
+    assert.doesNotMatch(result.posts[0].text, /\*\*/);
+});
+
+test('parseTwitterPosts strips markdown emphasis markers from retweeted text', () => {
+    const raw = '- [@codewolf] 🔁 Retweeted from @courtjester: **volleyball** practice was brutal today {likes:6 retweets:1 views:200}';
+    const result = parseTwitterPosts(raw, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
+    assert.equal(result.posts[0].retweetedText, 'volleyball practice was brutal today');
+    assert.doesNotMatch(result.posts[0].retweetedText, /\*\*/);
+});

@@ -51,3 +51,8 @@ test('parseReply normalizes CRLF line endings before matching Incoming lines', (
     const raw = '<analysis>x</analysis>\r\nIncoming¦3:47 PM¦Rosa¦hey\r\nIncoming¦3:48 PM¦Rosa¦there';
     assert.deepEqual(parseReply(raw), { messages: ['hey', 'there'], usedFallback: false });
 });
+
+test('parseReply degrades gracefully (no throw) for null/undefined input, matching the "nothing usable survives" convention', () => {
+    assert.deepEqual(parseReply(null), { messages: [], usedFallback: false });
+    assert.deepEqual(parseReply(undefined), { messages: [], usedFallback: false });
+});

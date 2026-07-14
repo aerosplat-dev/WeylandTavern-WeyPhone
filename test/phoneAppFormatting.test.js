@@ -222,3 +222,48 @@ test('parsePhoneAppOutput omits boldPrefix entirely when an item has no leading 
     const item = result.sections[0].items[0];
     assert.equal(item.boldPrefix, undefined);
 });
+
+// Regression tests for TIMESTAMP_RE: originally required an AM/PM suffix, so a 24-hour timestamp
+// like "[22:52]" was left embedded at the front of item.text instead of populating
+// item.timestamp. phoneAppPrompts.js's SHARED_FRAMING only actually instructs 12-hour "[10:52
+// PM]"-style timestamps (no 24-hour format is ever requested), so this is defensive hardening
+// against model drift rather than a fix for an observed real-output failure.
+test('parsePhoneAppOutput extracts a 12-hour AM/PM timestamp', () => {
+    const input = '## WEYLAND ALERTS\n- [9:14 AM] campus alert text';
+    const result = parsePhoneAppOutput(input);
+    const item = result.sections[0].items[0];
+    assert.equal(item.timestamp, '9:14 AM');
+    assert.equal(item.text, 'campus alert text');
+});
+
+test('parsePhoneAppOutput extracts a 24-hour timestamp instead of leaving it embedded in item.text', () => {
+    const input = '## WEYLAND ALERTS\n- [22:52] campus alert text';
+    const result = parsePhoneAppOutput(input);
+    const item = result.sections[0].items[0];
+    assert.equal(item.timestamp, '22:52');
+    assert.equal(item.text, 'campus alert text');
+});
+
+test('parsePhoneAppOutput tolerates a double space between the time and AM/PM, normalizing to a single space', () => {
+    const input = '## WEYLAND ALERTS\n- [10:52  PM] campus alert text';
+    const result = parsePhoneAppOutput(input);
+    const item = result.sections[0].items[0];
+    assert.equal(item.timestamp, '10:52 PM');
+    assert.equal(item.text, 'campus alert text');
+});
+
+// Coverage addition (not a behavior fix): parsePhoneAppOutput already handles CRLF correctly since
+// JS's "." excludes \r from matches and multiline "$" matches immediately before the following
+// \n, so the trailing \r never leaks into a captured title/item — confirmed here, mirroring the
+// existing CRLF-normalization test in test/messageParsing.test.js.
+test('parsePhoneAppOutput handles CRLF line endings without leaking \\r into titles or item text', () => {
+    const input = '## WEYLAND ALERTS\r\n- [9:14 AM] alert one\r\n- alert two\r\n\r\n## HEADLINES\r\n- headline one\r\n';
+    const result = parsePhoneAppOutput(input);
+    assert.deepEqual(result.sections.map(s => s.title), ['WEYLAND ALERTS', 'HEADLINES']);
+    const items = result.sections.flatMap(s => s.items);
+    assert.equal(items[0].timestamp, '9:14 AM');
+    for (const item of items) {
+        assert.doesNotMatch(item.text, /\r/);
+        if (item.timestamp) assert.doesNotMatch(item.timestamp, /\r/);
+    }
+});
