@@ -15,7 +15,7 @@
    #et-portal container"). */
 #wp-toggle-button {
     position: absolute;
-    bottom: 20px;
+    top: calc(var(--wp-topbar-bottom, 20px) + 8px);
     right: 20px;
     z-index: 9999;
     width: 48px;
@@ -36,7 +36,7 @@
 
 #wp-panel {
     position: absolute;
-    bottom: 80px;
+    top: calc(var(--wp-topbar-bottom, 20px) + 68px);
     right: 20px;
     width: 320px;
     max-height: 480px;
@@ -233,18 +233,12 @@
    the page. Hide the toggle button while the sheet is open so there's
    never an ambiguous overlapping-fixed-element state. */
 @media (max-width: 600px) {
-    /* Bottom-right (the desktop position) sits directly on top of the main chat's own text
-       entry/send button on mobile — move the toggle to the top-right of the chat area instead.
-       --wp-topbar-bottom is set at runtime by index.js from #top-bar's real rendered height
-       (its height isn't fixed/knowable from CSS alone — varies by theme/content). A first pass
-       using only env(safe-area-inset-top) clipped into #top-bar's own icon row; this positions
-       below it instead. Per user feedback (2026-07-11). */
-    #wp-toggle-button {
-        top: calc(var(--wp-topbar-bottom, 20px) + 8px);
-        bottom: auto;
-        right: 20px;
-    }
-
+    /* The toggle button's own top-right position (using --wp-topbar-bottom, set at runtime by
+       index.js from #top-bar's real rendered height) now lives in the base #wp-toggle-button
+       rule above and applies unchanged here — no mobile-specific override needed. The panel
+       still gets a full mobile-only override below: a full-screen sheet instead of the small
+       floating box, since on narrow viewports the floating box either overflows or crowds out
+       the rest of the page. */
     #wp-panel {
         top: env(safe-area-inset-top, 0px);
         left: 0;
