@@ -1435,13 +1435,21 @@ function initPanelResize(panel) {
             startRight = portalRect.right - rect.right;
             startWidth = rect.width;
             startHeight = rect.height;
-            maxWidth = window.innerWidth * 0.9;
-            maxHeight = window.innerHeight * 0.9;
+            // Cap the growth ceiling so that even a max-extent 'e'/'n' resize can never require
+            // newRight/newTop (below) to go negative to keep the opposite edge fixed — without
+            // this, the Math.max(0, ...) floor on newRight/newTop would clobber a legitimately
+            // negative offset and cause the opposite edge to visibly jump/drift.
+            maxWidth = Math.min(window.innerWidth * 0.9, startRight + startWidth);
+            maxHeight = Math.min(window.innerHeight * 0.9, startTop + startHeight);
             handle.setPointerCapture(event.pointerId);
             event.preventDefault();
             // Stop this from also being seen as a header drag-to-move if a handle ever visually
-            // overlaps the header (the north handle sits right at the header's top edge) — resize
-            // and move must never both fire for the same gesture.
+            // overlaps the header (the north handle sits right at the header's top edge). This is
+            // likely unreachable in practice since the handles are DOM siblings of the header, not
+            // descendants, so bubbling could never reach the header's own listener anyway — the
+            // real protection there is z-index stacking (the handle paints on top and receives the
+            // pointerdown first). Kept as harmless defensive code in case that DOM relationship
+            // ever changes.
             event.stopPropagation();
         });
 
