@@ -4,7 +4,7 @@ import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonality
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, findOrCreateDedicatedAppConversation } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from './lib/generation.js';
-import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, setModeToggleVisible } from './lib/panel.js';
+import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, setModeToggleVisible } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap } from './lib/portraits.js';
@@ -171,14 +171,14 @@ async function resolveWorldInfoTetheredForMainChat(context, extraScanText) {
 }
 
 function updateRegenerateEnabled(conversation) {
-    const button = document.getElementById('wp-regenerate-button');
-    if (!button) return;
+    const menu = document.getElementById('wp-regenerate-menu');
+    if (!menu) return;
     const isGenerating = generatingConversationIds.has(currentConversationId);
     const messages = conversation.messages;
     let cutIndex = messages.length;
     while (cutIndex > 0 && messages[cutIndex - 1].role === 'assistant') cutIndex--;
     const hasRegeneratable = cutIndex > 0 && cutIndex < messages.length;
-    setRegenerateEnabled(button, hasRegeneratable && !isGenerating);
+    setRegenerateMenuItemsEnabled(menu, { canRegenerate: hasRegeneratable && !isGenerating, hasMessages: messages.length > 0 });
 }
 
 function getSelectState() {

@@ -815,6 +815,7 @@
 
 #wp-input-row {
     display: flex;
+    align-items: center;
     padding: 8px;
     border-top: 1px solid var(--SmartThemeBorderColor, #333);
     gap: 6px;
@@ -955,6 +956,12 @@
 
 .wp-popup-menu-item:hover {
     background: var(--SmartThemeChatTintColor, #2a2a2a);
+}
+
+.wp-popup-menu-item:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 .wp-memory-item {
