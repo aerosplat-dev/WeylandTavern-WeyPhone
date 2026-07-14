@@ -1044,6 +1044,14 @@ function handleScreenBodyClick(event) {
         showScreen('twitter-profile');
         return;
     }
+    // A feed post's avatar or name/handle header (lib/panel.js's twitterPostCardMarkup) — same
+    // navigation as a Following-list item, just reached from a different screen.
+    const postAuthorLink = event.target.closest('.wp-twitter-post-author-link');
+    if (postAuthorLink) {
+        currentTwitterProfileCharacter = postAuthorLink.dataset.name;
+        showScreen('twitter-profile');
+        return;
+    }
     const phoneAppRefreshBtn = event.target.closest('#wp-phone-app-refresh-button');
     if (phoneAppRefreshBtn && !phoneAppRefreshBtn.disabled) {
         if (currentView === 'twitter-feed') {
@@ -1210,10 +1218,15 @@ function handleScreenBodyChange(event) {
 // Shared staleness-check-and-conditionally-regenerate for the phone-app / twitter-feed /
 // twitter-profile views: if this app's cached content was generated against a different main-chat
 // message count than the live one, kick off a fresh generation (unless one is already in flight)
-// rather than requiring the user to notice and tap refresh.
-function regenerateFlavorAppIfStale(context, settings, { cacheKey, trackingSet, regenerate }) {
+// rather than requiring the user to notice and tap refresh. `alsoIfMissing` additionally triggers
+// a generation when there's no cached entry AT ALL yet — opt-in (defaults false, preserving the
+// existing Home-tile-driven apps' behavior of just showing "Tap Refresh" on a first, never-visited
+// screen) and currently only passed for the twitter-profile view, since that's the one reached by
+// an explicit click-through (a following-list item, or a feed post's avatar/name) where landing on
+// an empty page and having to tap Refresh yourself would be a needless extra step.
+function regenerateFlavorAppIfStale(context, settings, { cacheKey, trackingSet, regenerate, alsoIfMissing = false }) {
     const entry = getPhoneAppContent(settings, context.chatId, cacheKey);
-    const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
+    const isStale = entry ? entry.chatMessageCountAtGeneration !== context.chat.length : alsoIfMissing;
     if (isStale && !trackingSet.has(cacheKey)) {
         regenerate();
     }
@@ -1302,6 +1315,7 @@ function showScreen(view) {
             cacheKey: twitterCacheKey('profile', currentTwitterProfileCharacter),
             trackingSet: twitterGeneratingKeys,
             regenerate: () => runTwitterGeneration('profile', currentTwitterProfileCharacter),
+            alsoIfMissing: true,
         });
         return;
     }

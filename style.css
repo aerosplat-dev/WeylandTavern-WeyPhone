@@ -544,6 +544,14 @@
     color: var(--SmartThemeBodyColor, #fff);
 }
 
+.wp-twitter-post-author-link {
+    cursor: pointer;
+}
+
+.wp-twitter-post-author-link:hover .wp-twitter-post-name {
+    text-decoration: underline;
+}
+
 .wp-twitter-post-handle {
     font-size: 12px;
     color: var(--SmartThemeEmColor, #aaa);
