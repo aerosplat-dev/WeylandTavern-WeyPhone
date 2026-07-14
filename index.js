@@ -179,9 +179,15 @@ function updateRegenerateEnabled(conversation) {
     if (!menu) return;
     const isGenerating = generatingConversationIds.has(currentConversationId);
     const messages = conversation.messages;
+    // A conversation ending on an unanswered user message (e.g. the last generation attempt
+    // failed before any reply was ever appended) has nothing for discardTrailingReply to trim,
+    // but there's still a real, unanswered attempt worth retrying — handleRegenerate below
+    // special-cases this same condition to skip straight to generateReply.
+    const endsOnPendingUserMessage = messages.length > 0 && messages[messages.length - 1].role === 'user';
     let cutIndex = messages.length;
     while (cutIndex > 0 && messages[cutIndex - 1].role === 'assistant') cutIndex--;
-    const hasRegeneratable = cutIndex > 0 && cutIndex < messages.length;
+    const hasTrailingReplyToDiscard = cutIndex > 0 && cutIndex < messages.length;
+    const hasRegeneratable = endsOnPendingUserMessage || hasTrailingReplyToDiscard;
     setRegenerateMenuItemsEnabled(menu, { canRegenerate: hasRegeneratable && !isGenerating, hasMessages: messages.length > 0 });
 }
 
@@ -758,7 +764,16 @@ async function handleRegenerate() {
     if (!conversation) return;
 
     const discarded = discardTrailingReply(settings, conversationId);
-    if (!discarded) return;
+    // discardTrailingReply only trims a TRAILING ASSISTANT run — it deliberately returns false
+    // and does nothing when the conversation already ends on a user message (nothing to trim),
+    // which is exactly the shape a failed generation leaves behind (the user's message got
+    // appended, but no reply ever did). That's still a real, retriable attempt, not a no-op: fall
+    // through to generateReply as-is rather than bailing, since generateReply already treats
+    // conversation.messages' last entry as "the message to reply to" and never appends anything
+    // itself.
+    const endsOnPendingUserMessage = conversation.messages.length > 0 &&
+        conversation.messages[conversation.messages.length - 1].role === 'user';
+    if (!discarded && !endsOnPendingUserMessage) return;
     editingMessageIndex = -1;
     rerenderIfStillViewing(conversationId, conversation.messages);
 
