@@ -240,6 +240,18 @@ function renderMessagesScreenNow(context, settings) {
     renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
 }
 
+// Shared by showScreen('threads') and refreshVisibleScreen()'s threads branch — builds the filtered
+// thread list's typing-decorated summaries and charName->portrait map, then renders. Returns the
+// portraitMap (unlike renderMessagesScreenNow) so showScreen can reuse it for the panel avatar.
+function renderThreadsScreenNow(context, settings) {
+    const screenBody = document.getElementById('wp-screen-body');
+    if (!screenBody) return null;
+    const summaries = withTypingState(getThreadsFor(settings, currentThreadsFilter ?? ''), generatingConversationIds);
+    const portraitMap = buildPortraitMap(context.characters, [currentThreadsFilter ?? ''], context.getThumbnailUrl);
+    renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
+    return portraitMap;
+}
+
 // Shared core of runPhoneAppGeneration/runTwitterGeneration — both run (or re-run) a flavor app's
 // generation entirely read-only against the main roleplay's real context: no mutation of
 // context.chat anywhere in this function or anything it calls (every context.chat access below is
@@ -476,11 +488,7 @@ function refreshVisibleScreen() {
     if (currentView === 'threads') {
         const context = SillyTavern.getContext();
         const settings = getSettings(context.extensionSettings);
-        const screenBody = document.getElementById('wp-screen-body');
-        if (!screenBody) return;
-        const summaries = withTypingState(getThreadsFor(settings, currentThreadsFilter ?? ''), generatingConversationIds);
-        const portraitMap = buildPortraitMap(context.characters, [currentThreadsFilter], context.getThumbnailUrl);
-        renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
+        renderThreadsScreenNow(context, settings);
         return;
     }
     if (currentView === 'conversation' && currentConversationId) {
@@ -1214,10 +1222,8 @@ function showScreen(view) {
 
     if (view === 'threads') {
         title.textContent = `${currentThreadsFilter ?? ''} Threads`;
-        const summaries = withTypingState(getThreadsFor(settings, currentThreadsFilter ?? ''), generatingConversationIds);
-        const portraitMap = buildPortraitMap(context.characters, [currentThreadsFilter], context.getThumbnailUrl);
-        renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[currentThreadsFilter]);
-        renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
+        const portraitMap = renderThreadsScreenNow(context, settings);
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap?.[currentThreadsFilter]);
         return;
     }
 
