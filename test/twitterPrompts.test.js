@@ -49,3 +49,11 @@ test('buildTwitterPrompt profile mode instructs the stat-block format and standa
     assert.match(prompt, /\{likes:N retweets:N views:N\}/);
     assert.match(prompt, /standalone posts/i);
 });
+
+test('buildTwitterPrompt does not contain the old contradicting retweet-format instruction, in either mode', () => {
+    const feedPrompt = buildTwitterPrompt({ mode: 'feed' });
+    const character = { name: 'Blake', handle: '@codewolf', bio: '- test bio' };
+    const profilePrompt = buildTwitterPrompt({ mode: 'profile', character });
+    assert.doesNotMatch(feedPrompt, /no special formatting needed/i);
+    assert.doesNotMatch(profilePrompt, /no special formatting needed/i);
+});
