@@ -36,6 +36,24 @@ test('chronicle includes the WEYLAND ALERTS and HEADLINES sections', () => {
     assert.match(PHONE_APP_PROMPTS.chronicle, /## HEADLINES/);
 });
 
+// Regression test: the WEYLAND ALERTS section had no explicit timestamp-format instruction of its
+// own (unlike Discord/Yik Yak/Twitter, which all spell out an exact machine-parseable convention),
+// so it only inherited the generic SHARED_FRAMING_PREAMBLE's vague "if it has a specific time" —
+// which the model interpreted as a day/date reference (e.g. "[Monday]"), a format
+// lib/phoneAppFormatting.js's TIMESTAMP_RE never matches (it requires a clock time), so the
+// bracketed day was left stuck in the rendered item text instead of becoming a timestamp badge.
+test('chronicle explicitly requires a clock-time timestamp (not a day/date) for Weyland Alerts', () => {
+    assert.match(PHONE_APP_PROMPTS.chronicle, /\[9:14 AM\]/);
+    assert.match(PHONE_APP_PROMPTS.chronicle, /do\s+not\s+use\s+a\s+day\s+name/i);
+});
+
+// The alert count now uses ST's real {{random::1::2::3}} macro (resolved server-side, before the
+// prompt is even sent, via context.substituteParams — see index.js's runFlavorAppGeneration) rather
+// than asking the model to freely pick "2-3 items" itself.
+test('chronicle uses the {{random::1::2::3}} macro for the Weyland Alerts item count', () => {
+    assert.match(PHONE_APP_PROMPTS.chronicle, /\{\{random::1::2::3\}\} items/);
+});
+
 test('discord references @luckypaww and the expected channels', () => {
     assert.match(PHONE_APP_PROMPTS.discord, /@luckypaww/);
     assert.match(PHONE_APP_PROMPTS.discord, /#announcements/);
