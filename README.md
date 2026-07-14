@@ -33,7 +33,7 @@ pop full-screen on mobile.
 - **Discord** — Every server has that one channel. Drop into the chaos, channel by channel.
 - **Yik Yak** — Anonymous, hyperlocal, completely unfiltered. Nobody knows who's posting.
   Everybody has a guess.
-- **Athel: The Game** — Meet Athel, living in her own dedicated app — right where she belongs.
+- **Aethel: The Game** — Meet Aethel, living in her own dedicated app — right where she belongs.
 
 ## Features
 
