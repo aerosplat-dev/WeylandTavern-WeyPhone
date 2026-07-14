@@ -756,7 +756,8 @@
     max-width: 90%;
 }
 
-.wp-message-edit-textarea {
+.wp-message-edit-textarea,
+.wp-memory-editing .wp-memory-edit-textarea {
     width: 100%;
     min-height: 48px;
     resize: vertical;
@@ -1020,20 +1021,6 @@
 .wp-memory-pin-btn.wp-memory-pinned {
     opacity: 1;
     color: var(--SmartThemeQuoteColor, #2b5278);
-}
-
-.wp-memory-editing .wp-memory-edit-textarea {
-    width: 100%;
-    min-height: 48px;
-    resize: vertical;
-    background: var(--SmartThemeBlurTintColor, #1a1a1a);
-    color: var(--SmartThemeBodyColor, #fff);
-    border: 1px solid var(--SmartThemeBorderColor, #333);
-    border-radius: 6px;
-    padding: 6px;
-    font-family: inherit;
-    font-size: inherit;
-    box-sizing: border-box;
 }
 
 #wp-memory-add-row {

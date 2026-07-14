@@ -1666,6 +1666,19 @@ function initPanel() {
     });
     composeButton.addEventListener('click', () => showScreen('contacts'));
 
+    // Delegated fallback-swap for '.wp-avatar' images (see avatarMarkup in lib/panel.js) — 'error'
+    // events don't bubble, so this must be attached with `capture: true` to still catch it via
+    // delegation on the whole panel (avatars render both inside #wp-screen-body, which is
+    // replaced wholesale on navigation, and in the persistent #wp-panel-avatar header slot).
+    panel.addEventListener('error', (event) => {
+        const img = event.target;
+        if (!(img instanceof HTMLImageElement) || !img.classList.contains('wp-avatar')) return;
+        const fallbackUrl = img.dataset.fallbackUrl;
+        if (!fallbackUrl) return;
+        delete img.dataset.fallbackUrl;
+        img.src = fallbackUrl;
+    }, true);
+
     document.getElementById('wp-tethered-checkbox').addEventListener('change', (event) => {
         if (!currentConversationId) return;
         const context = SillyTavern.getContext();
