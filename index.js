@@ -22,7 +22,10 @@ import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
-let currentView = 'home'; // 'home' | 'contacts' | 'conversation' | 'memory' | 'messages' | 'threads'
+// One of the 10 data-view values showScreen() sets on #wp-panel:
+// 'home' | 'contacts' | 'conversation' | 'memory' | 'messages' | 'threads' | 'phone-app' |
+// 'twitter-feed' | 'twitter-following' | 'twitter-profile'
+let currentView = 'home';
 let currentConversationId = null;
 let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
 let currentTwitterProfileCharacter = null;
@@ -196,10 +199,11 @@ function rerenderConversationMessages() {
     updateRegenerateEnabled(conversation);
 }
 
-// Re-renders the conversation view for `conversationId` only if the panel is still showing
-// that exact conversation — the user may have navigated away (or deleted it) during the ~60s
-// generation wait below, in which case #wp-messages either doesn't exist or belongs to a
-// different conversation entirely.
+// Re-renders the conversation view for `conversationId` only if the panel is still showing that
+// exact conversation. Callers invoke this after an await (e.g. generateReply's own generation
+// wait), by which point the user may have navigated away or deleted the conversation — so
+// #wp-messages may no longer exist, or may belong to a different conversation entirely. Both cases
+// are guarded here, making this a no-op rather than rendering into the wrong screen.
 function rerenderIfStillViewing(conversationId, messages) {
     if (currentView !== 'conversation' || currentConversationId !== conversationId) return;
     const messagesEl = document.getElementById('wp-messages');
@@ -1192,6 +1196,18 @@ function handleScreenBodyChange(event) {
     context.saveSettingsDebounced();
 }
 
+// Shared staleness-check-and-conditionally-regenerate for the phone-app / twitter-feed /
+// twitter-profile views: if this app's cached content was generated against a different main-chat
+// message count than the live one, kick off a fresh generation (unless one is already in flight)
+// rather than requiring the user to notice and tap refresh.
+function regenerateFlavorAppIfStale(context, settings, { cacheKey, trackingSet, regenerate }) {
+    const entry = getPhoneAppContent(settings, context.chatId, cacheKey);
+    const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
+    if (isStale && !trackingSet.has(cacheKey)) {
+        regenerate();
+    }
+}
+
 function showScreen(view) {
     currentView = view;
     // Navigating anywhere (including re-entering the same conversation) exits select mode —
@@ -1235,14 +1251,11 @@ function showScreen(view) {
         title.textContent = PHONE_APP_LABELS[currentPhoneApp];
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         rerenderPhoneAppScreenIfVisible(currentPhoneApp);
-
-        // Staleness check: if the main chat has moved on since this app's content was cached,
-        // automatically regenerate rather than requiring the user to notice and tap refresh.
-        const entry = getPhoneAppContent(settings, context.chatId, currentPhoneApp);
-        const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
-        if (isStale && !phoneAppGeneratingIds.has(currentPhoneApp)) {
-            runPhoneAppGeneration(currentPhoneApp);
-        }
+        regenerateFlavorAppIfStale(context, settings, {
+            cacheKey: currentPhoneApp,
+            trackingSet: phoneAppGeneratingIds,
+            regenerate: () => runPhoneAppGeneration(currentPhoneApp),
+        });
         return;
     }
 
@@ -1250,11 +1263,11 @@ function showScreen(view) {
         title.textContent = 'Twitter';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         rerenderTwitterScreenIfVisible('feed');
-        const entry = getPhoneAppContent(settings, context.chatId, twitterCacheKey('feed'));
-        const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
-        if (isStale && !twitterGeneratingKeys.has(twitterCacheKey('feed'))) {
-            runTwitterGeneration('feed');
-        }
+        regenerateFlavorAppIfStale(context, settings, {
+            cacheKey: twitterCacheKey('feed'),
+            trackingSet: twitterGeneratingKeys,
+            regenerate: () => runTwitterGeneration('feed'),
+        });
         return;
     }
 
@@ -1274,12 +1287,11 @@ function showScreen(view) {
         title.textContent = currentTwitterProfileCharacter;
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         rerenderTwitterScreenIfVisible('profile', currentTwitterProfileCharacter);
-        const cacheKey = twitterCacheKey('profile', currentTwitterProfileCharacter);
-        const entry = getPhoneAppContent(settings, context.chatId, cacheKey);
-        const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
-        if (isStale && !twitterGeneratingKeys.has(cacheKey)) {
-            runTwitterGeneration('profile', currentTwitterProfileCharacter);
-        }
+        regenerateFlavorAppIfStale(context, settings, {
+            cacheKey: twitterCacheKey('profile', currentTwitterProfileCharacter),
+            trackingSet: twitterGeneratingKeys,
+            regenerate: () => runTwitterGeneration('profile', currentTwitterProfileCharacter),
+        });
         return;
     }
 
@@ -1319,10 +1331,12 @@ function showScreen(view) {
     const isTyping = generatingConversationIds.has(currentConversationId);
     renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState());
     updateRegenerateEnabled(conversation);
-    const tetheredCheckbox = document.getElementById('wp-tethered-checkbox');
-    if (tetheredCheckbox) tetheredCheckbox.checked = conversation.tethered;
-    const modeToggleLabel = document.getElementById('wp-mode-toggle');
-    if (modeToggleLabel) setModeToggleVisible(modeToggleLabel, !conversation.isDedicatedApp);
+    // Route the tethered checkbox's checked AND disabled state (plus the mode-toggle visibility)
+    // through the shared helper, so entering the conversation view freshly re-verifies the disabled
+    // state against the currently-active main roleplay rather than assuming the last CHAT_CHANGED
+    // left it correct. The helper reads this same conversation's tethered/isDedicatedApp fields, so
+    // it reproduces exactly what the inline code did, plus the .disabled sync.
+    updateTetheredToggleAvailability();
 }
 
 // SillyTavern's mobile CSS sets `body { position: fixed; overflow: hidden; }`, which breaks
