@@ -1292,11 +1292,25 @@ function showScreen(view) {
 
 // SillyTavern's mobile CSS sets `body { position: fixed; overflow: hidden; }`, which breaks
 // position:fixed children appended directly to <body> (confirmed against a known, already-fixed
-// issue in the sibling EchoText extension, which hit this exact bug). The fix — also matching
-// EchoText's approach — is to mount our markup in a portal div that's a sibling of <body> (a
-// child of <html>) instead, escaping body's broken containing-block behavior on mobile entirely.
-// The portal itself has pointer-events:none so it never blocks clicks to the page underneath;
-// #wp-toggle-button/#wp-panel re-enable pointer-events on themselves (see style.css).
+// issue in the sibling EchoText extension, which hit this exact bug). This is why the portal used
+// to be mounted as a sibling of <body> (a child of <html>) instead of a descendant of it. That
+// escaped the broken-containing-block issue, but created a DIFFERENT bug: any sibling of <body>
+// with a non-negative z-index automatically outranks EVERYTHING inside <body> regardless of
+// magnitude, since position:fixed <body> is its own opaque stacking-context unit — so SillyTavern
+// core's own toasts (#toast-container, z-index 999999) could never paint above WeyPhone's panel on
+// mobile no matter how high toastr's own z-index was, proven empirically (a z-index sweep from 1
+// to 2000000 on the portal made zero difference — the comparison was never happening at that
+// level). Mounting inside <body> instead puts the portal back into the SAME stacking context as
+// toastr's own container, where z-index comparisons actually apply — the portal's own z-index
+// (below) is now deliberately kept under toastr's 999999 so toasts always win.
+//
+// This trades one platform-specific risk for another: the ORIGINAL position:fixed-inside-
+// position:fixed body bug this portal exists to route around was iOS-Safari-specific (see the
+// matching comment in Weyland-EchoText/index.js, "iOS PORTAL — escape SillyTavern's body {
+// position: fixed }") and has not been re-verified on a real iOS device since this change. If
+// WeyPhone's mobile positioning ever breaks specifically on iOS after this change, this is the
+// first place to look — revert to document.documentElement.appendChild(portal) and accept the
+// toast-behind-panel visual issue as the lesser regression until a real fix for both is found.
 const WP_PORTAL_ID = 'wp-portal';
 
 function ensurePortal() {
@@ -1304,8 +1318,8 @@ function ensurePortal() {
     if (!portal) {
         portal = document.createElement('div');
         portal.id = WP_PORTAL_ID;
-        portal.style.cssText = 'position:fixed; top:0; left:0; width:100dvw; height:100dvh; z-index:2147483647; pointer-events:none;';
-        document.documentElement.appendChild(portal);
+        portal.style.cssText = 'position:fixed; top:0; left:0; width:100dvw; height:100dvh; z-index:999998; pointer-events:none;';
+        document.body.appendChild(portal);
     }
     return portal;
 }
