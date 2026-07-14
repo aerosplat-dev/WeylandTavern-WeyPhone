@@ -86,3 +86,7 @@ test('discord and yikyak prompts still contain the full roster text after the we
     assert.ok(PHONE_APP_PROMPTS.yikyak.includes('Blake [@codewolf]'));
     assert.ok(PHONE_APP_PROMPTS.yikyak.includes('Warren [@lovingnotes]'));
 });
+
+test('discord prompt instructs live back-and-forth chat flavor', () => {
+    assert.match(PHONE_APP_PROMPTS.discord, /live back-and-forth/i);
+});

@@ -36,3 +36,16 @@ test('buildTwitterPrompt profile mode mentions retweets are acceptable', () => {
     const prompt = buildTwitterPrompt({ mode: 'profile', character });
     assert.match(prompt, /retweet/i);
 });
+
+test('buildTwitterPrompt feed mode instructs the stat-block format', () => {
+    const prompt = buildTwitterPrompt({ mode: 'feed' });
+    assert.match(prompt, /\{likes:N retweets:N views:N\}/);
+    assert.match(prompt, /standalone posts/i);
+});
+
+test('buildTwitterPrompt profile mode instructs the stat-block format and standalone-posts flavor', () => {
+    const character = { name: 'Blake', handle: '@codewolf', bio: '- test bio' };
+    const prompt = buildTwitterPrompt({ mode: 'profile', character });
+    assert.match(prompt, /\{likes:N retweets:N views:N\}/);
+    assert.match(prompt, /standalone posts/i);
+});
