@@ -6,6 +6,25 @@ import { parseTwitterPosts } from '../lib/twitterParsing.js';
 const ROSTER = [{ name: 'Blake', handle: '@codewolf', bio: '' }];
 const PSA_ACCOUNTS = [{ name: 'Weyland Alert', handle: '@WeylandAlert' }];
 
+test('parseTwitterPosts extracts a profile-mode "## BIO" section as bio, separate from posts', () => {
+    const raw = `## BIO
+Professional bug-fixer, amateur chaos-generator.
+
+## POSTS
+- [@codewolf] just shipped a bug fix at 3am {likes:12 retweets:2 views:340}`;
+    const result = parseTwitterPosts(raw, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
+    assert.equal(result.bio, 'Professional bug-fixer, amateur chaos-generator.');
+    assert.equal(result.posts.length, 1);
+});
+
+test('parseTwitterPosts strips markdown emphasis from the bio and returns null when no "## BIO" section is present', () => {
+    const withBoldBio = parseTwitterPosts('## BIO\n**official** account, do not @ me\n\n## POSTS\n', { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
+    assert.equal(withBoldBio.bio, 'official account, do not @ me');
+
+    const feedModeOutput = parseTwitterPosts('## FEED\n- [@codewolf] hi {likes:1 retweets:0 views:5}', { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
+    assert.equal(feedModeOutput.bio, null);
+});
+
 test('parseTwitterPosts extracts a normal post with real stats', () => {
     const raw = '- [@codewolf] just shipped a bug fix at 3am {likes:12 retweets:2 views:340}';
     const result = parseTwitterPosts(raw, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS });
@@ -45,10 +64,10 @@ test('parseTwitterPosts skips unparseable lines gracefully, never throws', () =>
     assert.equal(result.posts.length, 1);
 });
 
-test('parseTwitterPosts returns empty posts for empty/garbage/non-string input', () => {
-    assert.deepEqual(parseTwitterPosts('', { roster: ROSTER, psaAccounts: PSA_ACCOUNTS }), { posts: [] });
-    assert.deepEqual(parseTwitterPosts(null, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS }), { posts: [] });
-    assert.deepEqual(parseTwitterPosts('garbage text with no structure', { roster: ROSTER, psaAccounts: PSA_ACCOUNTS }), { posts: [] });
+test('parseTwitterPosts returns empty posts (and a null bio) for empty/garbage/non-string input', () => {
+    assert.deepEqual(parseTwitterPosts('', { roster: ROSTER, psaAccounts: PSA_ACCOUNTS }), { posts: [], bio: null });
+    assert.deepEqual(parseTwitterPosts(null, { roster: ROSTER, psaAccounts: PSA_ACCOUNTS }), { posts: [], bio: null });
+    assert.deepEqual(parseTwitterPosts('garbage text with no structure', { roster: ROSTER, psaAccounts: PSA_ACCOUNTS }), { posts: [], bio: null });
 });
 
 // Regression tests for POST_LINE_RE being too strict: the original regex required the stat block

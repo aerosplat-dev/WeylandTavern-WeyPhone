@@ -3,22 +3,56 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTwitterPrompt, PSA_ACCOUNTS } from '../lib/twitterPrompts.js';
 
-test('PSA_ACCOUNTS has exactly the 8 operator-specified accounts, excluding Red Lantern/Black Barrel/Mama\'s Den', () => {
-    assert.equal(PSA_ACCOUNTS.length, 8);
+test('PSA_ACCOUNTS has exactly the 11 operator-specified accounts, excluding Red Lantern/Black Barrel/Mama\'s Den', () => {
+    assert.equal(PSA_ACCOUNTS.length, 11);
     const names = PSA_ACCOUNTS.map(a => a.name);
     assert.ok(names.includes('Weyland Alert'));
     assert.ok(names.includes('Kodo Bowl'));
+    assert.ok(names.includes('Weyland Dining Services'));
+    assert.ok(names.includes('Weyland Research Center'));
+    assert.ok(names.includes('Weyland Tavern'));
     assert.ok(!names.includes('Red Lantern'));
     assert.ok(!names.includes('Black Barrel'));
     assert.ok(!names.includes("Mama's Den"));
 });
 
-test('buildTwitterPrompt feed mode includes the full roster and PSA accounts', () => {
+test('every PSA account has a unique, non-empty portraitKey', () => {
+    const keys = PSA_ACCOUNTS.map(a => a.portraitKey);
+    assert.ok(keys.every(k => typeof k === 'string' && k.length > 0));
+    assert.equal(new Set(keys).size, keys.length, 'portraitKeys must be unique — collisions would mix up profile pictures');
+});
+
+test('Weyland Dining Services carries an explicit grounding context (no standalone World Info entry of its own)', () => {
+    const dining = PSA_ACCOUNTS.find(a => a.name === 'Weyland Dining Services');
+    assert.ok(dining.context);
+    assert.match(dining.context, /Brodlak/);
+    assert.match(dining.context, /Kyomi/);
+});
+
+test('Weyland Research Center and Weyland Tavern have no hardcoded context (rely on their own real World Info entries)', () => {
+    const research = PSA_ACCOUNTS.find(a => a.name === 'Weyland Research Center');
+    const tavern = PSA_ACCOUNTS.find(a => a.name === 'Weyland Tavern');
+    assert.equal(research.context, undefined);
+    assert.equal(tavern.context, undefined);
+});
+
+test('buildTwitterPrompt feed mode includes the full roster and PSA accounts, including the new Dining Services context sentence', () => {
     const prompt = buildTwitterPrompt({ mode: 'feed' });
     assert.match(prompt, /## FEED/);
     assert.ok(prompt.includes('Blake [@codewolf]'));
     assert.ok(prompt.includes('Weyland Alert [@WeylandAlert]'));
-    assert.match(prompt, /should NOT dominate/i);
+    assert.ok(prompt.includes('Weyland Dining Services [@WeylandDining] — the university office that runs the Brodlak and Kyomi dining halls'));
+});
+
+// Regression test: {{random::2::3::4}} must appear exactly once in the feed prompt. ST's macro
+// engine resolves each occurrence of {{random::...}} independently — writing it a second time
+// (e.g. in a header restating the count) would risk two DIFFERENT numbers in one prompt, an
+// internally contradictory instruction.
+test('buildTwitterPrompt feed mode uses the {{random::2::3::4}} macro for the PSA post count exactly once', () => {
+    const prompt = buildTwitterPrompt({ mode: 'feed' });
+    const occurrences = prompt.match(/\{\{random::2::3::4\}\}/g) ?? [];
+    assert.equal(occurrences.length, 1);
+    assert.match(prompt, /Exactly \{\{random::2::3::4\}\} of the posts.*MUST be from PSA\/business accounts/s);
 });
 
 test('buildTwitterPrompt profile mode scopes to exactly one character', () => {
@@ -29,6 +63,29 @@ test('buildTwitterPrompt profile mode scopes to exactly one character', () => {
     assert.ok(prompt.includes('- Punk wolfgirl, computer science major'));
     assert.doesNotMatch(prompt, /Kai \[@breakingthecycle\]/);
     assert.doesNotMatch(prompt, /Weyland Alert/);
+});
+
+test('buildTwitterPrompt profile mode requests a "## BIO" section for a roster character', () => {
+    const character = { name: 'Blake', handle: '@codewolf', bio: '- test bio' };
+    const prompt = buildTwitterPrompt({ mode: 'profile', character });
+    assert.match(prompt, /## BIO/);
+    assert.match(prompt, /under 100 characters/i);
+});
+
+test('buildTwitterPrompt profile mode works for a PSA account with an explicit context sentence (Dining Services)', () => {
+    const dining = PSA_ACCOUNTS.find(a => a.name === 'Weyland Dining Services');
+    const prompt = buildTwitterPrompt({ mode: 'profile', character: dining });
+    assert.match(prompt, /## BIO/);
+    assert.match(prompt, /## POSTS/);
+    assert.ok(prompt.includes('Weyland Dining Services [@WeylandDining] — the university office that runs the Brodlak and Kyomi dining halls'));
+    assert.doesNotMatch(prompt, /Blake \[@codewolf\]/);
+});
+
+test('buildTwitterPrompt profile mode works for a PSA account with no context (relies on name/handle alone)', () => {
+    const tavern = PSA_ACCOUNTS.find(a => a.name === 'Weyland Tavern');
+    const prompt = buildTwitterPrompt({ mode: 'profile', character: tavern });
+    assert.ok(prompt.includes('Weyland Tavern [@WeylandTavern]'));
+    assert.match(prompt, /## POSTS/);
 });
 
 test('buildTwitterPrompt profile mode mentions retweets are acceptable', () => {

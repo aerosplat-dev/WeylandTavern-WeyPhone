@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPortraitMap } from '../lib/portraits.js';
+import { buildPortraitMap, buildPsaPortraitMap } from '../lib/portraits.js';
 
 function fakeGetThumbnailUrl(type, file) {
     return `/thumbnail?type=${type}&file=${file}`;
@@ -84,4 +84,20 @@ test('buildPortraitMap returns an empty map for an empty charNames list', () => 
 test('buildPortraitMap does not throw on an undefined charName and falls back to an empty initial', () => {
     const map = buildPortraitMap([{ name: 'Rosa', avatar: 'rosa.png' }], [undefined], fakeGetThumbnailUrl);
     assert.deepEqual(map[undefined], { primaryUrl: null, fallbackUrl: null, initial: '' });
+});
+
+test('buildPsaPortraitMap resolves a bundled local asset keyed by portraitKey, not a derived slug', () => {
+    const accounts = [
+        { name: 'Weyland Alert', portraitKey: 'alert' },
+        { name: 'Weyland Research Center', portraitKey: 'research' },
+    ];
+    const map = buildPsaPortraitMap(accounts);
+    assert.equal(map['Weyland Alert'].primaryUrl, '/scripts/extensions/third-party/Weyland-WeyPhone/assets/profiles/profile_alert.png');
+    assert.equal(map['Weyland Research Center'].primaryUrl, '/scripts/extensions/third-party/Weyland-WeyPhone/assets/profiles/profile_research.png');
+});
+
+test('buildPsaPortraitMap never sets a fallbackUrl (local assets don\'t need a CDN-failure fallback) and derives initial from the account name', () => {
+    const map = buildPsaPortraitMap([{ name: 'Kodo Bowl', portraitKey: 'kodo' }]);
+    assert.equal(map['Kodo Bowl'].fallbackUrl, null);
+    assert.equal(map['Kodo Bowl'].initial, 'K');
 });

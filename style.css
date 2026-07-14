@@ -501,6 +501,14 @@
     color: var(--SmartThemeEmColor, #aaa);
 }
 
+.wp-twitter-profile-bio {
+    font-size: 13px;
+    color: var(--SmartThemeBodyColor, #fff);
+    text-align: center;
+    max-width: 260px;
+    line-height: 1.4;
+}
+
 .wp-twitter-following-item .wp-list-item-snippet {
     color: var(--SmartThemeEmColor, #aaa);
 }

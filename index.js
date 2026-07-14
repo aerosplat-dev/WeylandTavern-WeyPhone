@@ -7,7 +7,7 @@ import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, recons
 import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, setModeToggleVisible } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
-import { buildPortraitMap } from './lib/portraits.js';
+import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
 import { parseReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
@@ -416,29 +416,45 @@ function twitterCacheKey(mode, characterName) {
 
 const twitterGeneratingKeys = new Set();
 
+// A Twitter profile's subject is either a roster character (Following list) or a PSA/business
+// account (also on the Following list, as of the PSA-profile feature) — both are just {name,
+// handle, ...} objects, so one name-keyed lookup across both lists covers either case.
+function findTwitterProfileSubject(name) {
+    return WEYLAND_ROSTER.find(c => c.name === name) ?? PSA_ACCOUNTS.find(a => a.name === name);
+}
+
+// Every PSA/business account portrait is a fixed local asset (see lib/portraits.js's
+// buildPsaPortraitMap) — cheap to build in full every time rather than filtering to just the
+// names actually in view, and this guarantees a PSA account's local asset always wins over any
+// (wrong) weybooru-CDN guess buildPortraitMap would otherwise attempt for that same name.
+function buildTwitterPortraitMap(context, charNames) {
+    return { ...buildPortraitMap(context.characters, charNames, context.getThumbnailUrl), ...buildPsaPortraitMap(PSA_ACCOUNTS) };
+}
+
 /**
  * Twitter's equivalent of runPhoneAppGeneration, generalized for its two modes (main feed, or one
- * character's profile). Shares runFlavorAppGeneration's read-only mechanism and never-mutates-
- * context.chat guarantee — the only Twitter-specific pieces are building the prompt dynamically via
- * buildTwitterPrompt (instead of a static PHONE_APP_PROMPTS[appKey] lookup), parsing with
- * parseTwitterPosts, and using a composite cache key.
+ * profile subject's page — a roster character or a PSA/business account). Shares
+ * runFlavorAppGeneration's read-only mechanism and never-mutates-context.chat guarantee — the only
+ * Twitter-specific pieces are building the prompt dynamically via buildTwitterPrompt (instead of a
+ * static PHONE_APP_PROMPTS[appKey] lookup), parsing with parseTwitterPosts, and using a composite
+ * cache key.
  * @param {'feed' | 'profile'} mode
- * @param {string} [characterName] required when mode === 'profile'
+ * @param {string} [subjectName] required when mode === 'profile'
  */
-function runTwitterGeneration(mode, characterName) {
-    const cacheKey = twitterCacheKey(mode, characterName);
+function runTwitterGeneration(mode, subjectName) {
+    const cacheKey = twitterCacheKey(mode, subjectName);
     return runFlavorAppGeneration({
         trackingSet: twitterGeneratingKeys,
         trackingKey: cacheKey,
-        rerender: () => rerenderTwitterScreenIfVisible(mode, characterName),
+        rerender: () => rerenderTwitterScreenIfVisible(mode, subjectName),
         buildPromptText: () => {
             if (mode === 'profile') {
-                const rosterEntry = WEYLAND_ROSTER.find(c => c.name === characterName);
-                if (!rosterEntry) {
-                    toastr.error(`No roster entry found for "${characterName}".`, 'WeyPhone');
+                const subject = findTwitterProfileSubject(subjectName);
+                if (!subject) {
+                    toastr.error(`No account found for "${subjectName}".`, 'WeyPhone');
                     return null;
                 }
-                return buildTwitterPrompt({ mode: 'profile', character: rosterEntry });
+                return buildTwitterPrompt({ mode: 'profile', character: subject });
             }
             return buildTwitterPrompt({ mode: 'feed' });
         },
@@ -450,26 +466,25 @@ function runTwitterGeneration(mode, characterName) {
     });
 }
 
-function rerenderTwitterScreenIfVisible(mode, characterName) {
+function rerenderTwitterScreenIfVisible(mode, subjectName) {
     const expectedView = mode === 'feed' ? 'twitter-feed' : 'twitter-profile';
     if (currentView !== expectedView) return;
-    if (mode === 'profile' && currentTwitterProfileCharacter !== characterName) return;
+    if (mode === 'profile' && currentTwitterProfileCharacter !== subjectName) return;
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return;
-    const cacheKey = twitterCacheKey(mode, characterName);
+    const cacheKey = twitterCacheKey(mode, subjectName);
     const entry = getPhoneAppContent(settings, context.chatId, cacheKey);
     const isGenerating = twitterGeneratingKeys.has(cacheKey);
     if (mode === 'feed') {
         const authorNames = (entry?.content?.posts ?? []).map(p => p.authorName);
-        const portraitMap = buildPortraitMap(context.characters, authorNames, context.getThumbnailUrl);
+        const portraitMap = buildTwitterPortraitMap(context, authorNames);
         renderTwitterFeedScreen(screenBody, { entry, isGenerating, formatRelativeTime, portraitMap });
     } else {
-        const rosterEntry = WEYLAND_ROSTER.find(c => c.name === characterName);
         renderTwitterProfileScreen(screenBody, {
-            character: rosterEntry,
-            portraitMap: buildPortraitMap(context.characters, [characterName], context.getThumbnailUrl),
+            character: findTwitterProfileSubject(subjectName),
+            portraitMap: buildTwitterPortraitMap(context, [subjectName]),
             entry,
             isGenerating,
             formatRelativeTime,
@@ -1270,8 +1285,8 @@ function showScreen(view) {
     if (view === 'twitter-following') {
         title.textContent = 'Following';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
-        const portraitMap = buildPortraitMap(context.characters, WEYLAND_ROSTER.map(c => c.name), context.getThumbnailUrl);
-        renderTwitterFollowingScreen(screenBody, { roster: WEYLAND_ROSTER, portraitMap });
+        const portraitMap = buildTwitterPortraitMap(context, WEYLAND_ROSTER.map(c => c.name));
+        renderTwitterFollowingScreen(screenBody, { roster: [...WEYLAND_ROSTER, ...PSA_ACCOUNTS], portraitMap });
         return;
     }
 
