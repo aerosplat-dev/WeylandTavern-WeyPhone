@@ -159,6 +159,23 @@ test('parsePhoneAppOutput drops the real captured Discord output\'s leading empt
     assert.ok(titles.some(t => t.startsWith('#')), 'expected real per-channel sub-headers to survive as sections');
 });
 
+// Regression test: a real generation was observed collapsing to one flat, non-empty "## DISCORD"
+// section (the model ignoring the per-channel-header instruction entirely, and additionally
+// writing an ad hoc "[#channel] [time] @user: text" convention within the bullet instead of the
+// requested "[time] **@handle** — text" one) — the raw content still needs to parse into a
+// section with real items rather than silently dropping everything, even though the section title
+// itself will duplicate the panel header (that half of the fix lives in lib/panel.js's
+// renderPhoneAppScreen, which suppresses a section title equal to the app label).
+test('parsePhoneAppOutput still extracts items when the model ignores the per-channel-header instruction and emits one flat non-empty "## DISCORD" section', () => {
+    const flatDiscordOutput = `## DISCORD
+- [#announcements] [9:14 PM] @luckypaww: pushed a hotfix tonight, fixed the expression bug.
+- [#dorm-commons] [10:02 PM] @MikaFDIGL: spinning tonight at Rivera's, who's coming?`;
+    const result = parsePhoneAppOutput(flatDiscordOutput);
+    assert.equal(result.sections.length, 1);
+    assert.equal(result.sections[0].title, 'DISCORD');
+    assert.equal(result.sections[0].items.length, 2);
+});
+
 test('parsePhoneAppOutput extracts real captured timestamps from Chronicle and Yik Yak output', () => {
     const chronicle = parsePhoneAppOutput(REAL_CHRONICLE_OUTPUT);
     const chronicleTimestamps = chronicle.sections.flatMap(s => s.items).map(i => i.timestamp).filter(Boolean);

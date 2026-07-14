@@ -597,15 +597,6 @@
     vertical-align: middle;
 }
 
-.wp-discord-channel-pill {
-    display: inline-block;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #6b74d6;
-    margin-right: 6px;
-}
-
 .wp-yikyak-item {
     display: flex;
     justify-content: space-between;

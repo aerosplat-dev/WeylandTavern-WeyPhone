@@ -90,3 +90,20 @@ test('discord and yikyak prompts still contain the full roster text after the we
 test('discord prompt instructs live back-and-forth chat flavor', () => {
     assert.match(PHONE_APP_PROMPTS.discord, /live back-and-forth/i);
 });
+
+// Regression test: the discord prompt used to only vaguely say "spread across channels", with no
+// literal, machine-parseable convention for which channel a message belongs to or how to write a
+// message bullet — the per-channel "## #channel" sub-header nesting that lib/phoneAppFormatting.js
+// and lib/panel.js were built/tested against was something one real generation happened to do on
+// its own, never something the prompt actually required, so other generations could (and did)
+// drift to an entirely unparseable format instead. This asserts the prompt now explicitly mandates
+// the exact convention the parser/renderer rely on.
+test('discord prompt explicitly mandates per-channel "## #channel" sub-headers instead of one flat section', () => {
+    assert.match(PHONE_APP_PROMPTS.discord, /## #announcements/);
+    assert.match(PHONE_APP_PROMPTS.discord, /own markdown h2 header/i);
+    assert.match(PHONE_APP_PROMPTS.discord, /do not write "in #channel:"/i, 'prompt must explicitly tell the model not to name its channel inline in the message text');
+});
+
+test('discord prompt gives an exact message-bullet template with timestamp, bolded handle, and em dash', () => {
+    assert.match(PHONE_APP_PROMPTS.discord, /\[10:52 PM\]\s+\*\*@handle\*\*\s+—\s+message text/);
+});
