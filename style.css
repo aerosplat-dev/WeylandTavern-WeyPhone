@@ -184,7 +184,8 @@
 #wp-panel[data-view="phone-app"] #wp-home-button,
 #wp-panel[data-view="twitter-feed"] #wp-home-button,
 #wp-panel[data-view="twitter-following"] #wp-home-button,
-#wp-panel[data-view="twitter-profile"] #wp-home-button {
+#wp-panel[data-view="twitter-profile"] #wp-home-button,
+#wp-panel[data-view="threads"] #wp-home-button {
     display: flex;
 }
 
@@ -194,7 +195,8 @@
 
 #wp-panel[data-view="memory"] #wp-back-button,
 #wp-panel[data-view="twitter-following"] #wp-back-button,
-#wp-panel[data-view="twitter-profile"] #wp-back-button {
+#wp-panel[data-view="twitter-profile"] #wp-back-button,
+#wp-panel[data-view="threads"] #wp-back-button {
     display: flex;
 }
 
@@ -210,7 +212,8 @@
 }
 
 #wp-panel[data-view="conversation"] #wp-panel-avatar,
-#wp-panel[data-view="memory"] #wp-panel-avatar {
+#wp-panel[data-view="memory"] #wp-panel-avatar,
+#wp-panel[data-view="threads"] #wp-panel-avatar {
     display: block;
 }
 
