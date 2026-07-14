@@ -38,8 +38,8 @@
     position: absolute;
     top: calc(var(--wp-topbar-bottom, 20px) + 68px);
     right: 20px;
-    width: 320px;
-    max-height: 480px;
+    width: 360px;
+    max-height: 560px;
     background: var(--SmartThemeBlurTintColor, #1e1e1e);
     font-family: var(--mainFontFamily, "Noto Sans", sans-serif);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
@@ -55,6 +55,30 @@
 
 #wp-panel.wp-open {
     display: flex;
+}
+
+/* Desktop-only: native CSS resize + drag-to-move affordance (see initPanelDrag in index.js).
+   Gated to the same 601px breakpoint the mobile full-screen-sheet media query below uses on the
+   other side, so the two behaviors never overlap. */
+@media (min-width: 601px) {
+    #wp-panel {
+        resize: both;
+        overflow: auto;
+        min-width: 280px;
+        min-height: 320px;
+        max-width: 90vw;
+        max-height: 90vh;
+    }
+
+    #wp-panel-header {
+        cursor: move;
+    }
+
+    #wp-panel-header button,
+    #wp-panel-header input,
+    #wp-panel-header label {
+        cursor: pointer;
+    }
 }
 
 #wp-panel-header {

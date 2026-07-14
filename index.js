@@ -1335,6 +1335,67 @@ function updateTopBarOffset() {
     document.documentElement.style.setProperty('--wp-topbar-bottom', `${Math.max(bottom, 0)}px`);
 }
 
+// Desktop-only drag-to-move for the panel, via its own header. Mobile's full-screen sheet has no
+// use for this (its own media query pins top/left/right/bottom unconditionally, which this drag
+// handler must never fight with) — gated behind the same 601px breakpoint the mobile media query
+// uses on the other side, checked fresh on every drag start so a mid-session window resize across
+// the boundary is respected without needing a page reload.
+function initPanelDrag(panel, headerEl) {
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startRight = 0;
+    let startTop = 0;
+
+    headerEl.addEventListener('pointerdown', (event) => {
+        if (!window.matchMedia('(min-width: 601px)').matches) return;
+        // Don't start a drag from an interactive child (buttons, the tethered toggle, etc.) —
+        // only the header's own empty space should initiate a move.
+        if (event.target.closest('button, input, label, a')) return;
+        dragging = true;
+        startX = event.clientX;
+        startY = event.clientY;
+        const rect = panel.getBoundingClientRect();
+        const portalRect = panel.offsetParent.getBoundingClientRect();
+        startRight = portalRect.right - rect.right;
+        startTop = rect.top - portalRect.top;
+        headerEl.setPointerCapture(event.pointerId);
+        event.preventDefault();
+    });
+
+    headerEl.addEventListener('pointermove', (event) => {
+        if (!dragging) return;
+        const deltaX = event.clientX - startX;
+        const deltaY = event.clientY - startY;
+        panel.style.right = `${Math.max(0, startRight - deltaX)}px`;
+        panel.style.top = `${Math.max(0, startTop + deltaY)}px`;
+    });
+
+    const endDrag = () => { dragging = false; };
+    headerEl.addEventListener('pointerup', endDrag);
+    headerEl.addEventListener('pointercancel', endDrag);
+
+    // A desktop drag can leave inline style.top/style.right on the panel. If the browser window
+    // is then resized down across the mobile breakpoint while the panel is still open, those
+    // inline styles would win the cascade over the mobile media query's own top/left/right/bottom
+    // rules (inline styles always beat stylesheet rules, media query or not), visually conflicting
+    // with the full-screen sheet layout. Clear them the moment we cross into mobile width so the
+    // mobile rules take over cleanly.
+    const mobileQuery = window.matchMedia('(max-width: 600px)');
+    const clearInlinePositionOnMobile = (event) => {
+        if (event.matches) {
+            panel.style.removeProperty('top');
+            panel.style.removeProperty('right');
+        }
+    };
+    if (mobileQuery.addEventListener) {
+        mobileQuery.addEventListener('change', clearInlinePositionOnMobile);
+    } else {
+        // Safari <14 fallback.
+        mobileQuery.addListener(clearInlinePositionOnMobile);
+    }
+}
+
 // Re-evaluates whether a main roleplay is currently active and syncs the tethered toggle's
 // disabled state accordingly — called once on load and again every time SillyTavern's own
 // CHAT_CHANGED event fires, so switching characters/chats in the main window updates the toggle
@@ -1371,6 +1432,8 @@ function initPanel() {
     const homeButton = document.getElementById('wp-home-button');
     const backButton = document.getElementById('wp-back-button');
     const composeButton = document.getElementById('wp-compose-button');
+
+    initPanelDrag(panel, document.getElementById('wp-panel-header'));
 
     // On narrow/mobile viewports the panel becomes a full-screen sheet (see style.css) and can
     // visually cover the toggle button, so open/close state is tracked explicitly here rather
