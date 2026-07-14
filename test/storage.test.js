@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     createConversation,
@@ -26,9 +26,38 @@ import {
     findOrCreateDedicatedAppConversation,
     getThreadsFor,
     findMostRecentThread,
+    genTimestamp,
     DEFAULT_MEMORY_PRIMARY_MODEL,
     DEFAULT_MEMORY_BACKUP_MODEL,
 } from '../lib/storage.js';
+
+test('genTimestamp returns Date.now() when it is ahead of the last recorded timestamp (normal branch)', () => {
+    mock.timers.enable({ apis: ['Date'] });
+    try {
+        // Comfortably ahead of any real timestamp genTimestamp may have already recorded from
+        // earlier (real-clock) calls elsewhere in this file/module.
+        const future = Date.now() + 10_000_000;
+        mock.timers.setTime(future);
+        const result = genTimestamp();
+        assert.equal(result, future);
+    } finally {
+        mock.timers.reset();
+    }
+});
+
+test('genTimestamp increments by 1 to break ties when two calls land on the same millisecond', () => {
+    mock.timers.enable({ apis: ['Date'] });
+    try {
+        const future = Date.now() + 20_000_000;
+        mock.timers.setTime(future);
+        const first = genTimestamp(); // now > lastTimestamp -> normal branch, lastTimestamp = future
+        const second = genTimestamp(); // Date.now() unchanged (fake clock frozen) -> tie-break branch
+        assert.equal(second, first + 1);
+        assert.ok(second > first);
+    } finally {
+        mock.timers.reset();
+    }
+});
 
 test('createConversation creates a conversation with a generated id and empty messages', () => {
     const settings = { conversations: {} };
