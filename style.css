@@ -488,6 +488,57 @@
     color: var(--SmartThemeEmColor, #aaa);
 }
 
+.wp-discord-item {
+    border-left: 2px solid transparent;
+    padding-left: 8px;
+    line-height: 1.35;
+}
+
+.wp-discord-server-post {
+    border-left-color: #6b74d6;
+}
+
+.wp-discord-server-tag {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: #6b74d6;
+    border: 1px solid #6b74d6;
+    border-radius: 4px;
+    padding: 1px 4px;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.wp-discord-channel-pill {
+    display: inline-block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6b74d6;
+    margin-right: 6px;
+}
+
+.wp-yikyak-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    line-height: 1.5;
+}
+
+.wp-yikyak-vote-pill {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 600;
+    color: #c8e35a;
+    background: color-mix(in srgb, #c8e35a 15%, transparent);
+    border-radius: 4px;
+    padding: 1px 6px;
+    white-space: nowrap;
+}
+
 .wp-list-item {
     display: flex;
     align-items: center;
