@@ -1419,10 +1419,24 @@ function initPanelResize(panel) {
     let startRight = 0;
     let startWidth = 0;
     let startHeight = 0;
-    // Separate max ceilings per edge: 'e'/'n' additionally need to stay bounded by
-    // startRight+startWidth / startTop+startHeight (see the pointerdown comment below), but
-    // 'w'/'s' never touch newRight/newTop and must NOT share that reduced ceiling — they're
-    // bounded only by the flat viewport-relative max.
+    // Separate max ceiling per edge — EVERY direction has an implicit opposite edge that must
+    // stay within the viewport, not just 'e'/'n':
+    //   - 'e' keeps the left edge fixed (by construction, see pointermove below); growth is
+    //     bounded by startRight+startWidth so the panel's own right edge can't be pushed past the
+    //     right side of the viewport.
+    //   - 'w' keeps the right edge fixed; growth is bounded by (viewport width - startRight) so
+    //     the panel's LEFT edge can't be pushed past the left side of the viewport. (An earlier
+    //     version of this fix wrongly gave 'w' only the flat viewport-relative ceiling with no
+    //     left-edge protection at all — reproducible off-screen bug: drag the panel toward the
+    //     right first via the header, then an extreme 'w' resize pushes the panel's left edge to a
+    //     negative x-coordinate, off the left side of the screen entirely.)
+    //   - 'n' keeps the bottom edge fixed; growth is bounded by startTop+startHeight so the top
+    //     edge can't go past the top of the viewport.
+    //   - 's' keeps the top edge fixed; growth is bounded by (viewport height - startTop) so the
+    //     BOTTOM edge can't be pushed past the bottom of the viewport (same class of bug as 'w'
+    //     above, mirrored on the vertical axis — reproducible from the panel's own default
+    //     position with no prior drag needed, since its default top offset already leaves less
+    //     than 90vh of room below it).
     let maxWidthForE = 0;
     let maxWidthForW = 0;
     let maxHeightForN = 0;
@@ -1441,16 +1455,12 @@ function initPanelResize(panel) {
             startRight = portalRect.right - rect.right;
             startWidth = rect.width;
             startHeight = rect.height;
-            // Cap the growth ceiling so that even a max-extent 'e'/'n' resize can never require
-            // newRight/newTop (below) to go negative to keep the opposite edge fixed — without
-            // this, the Math.max(0, ...) floor on newRight/newTop would clobber a legitimately
-            // negative offset and cause the opposite edge to visibly jump/drift. This constraint
-            // only applies to 'e'/'n' (they alone touch newRight/newTop); 'w'/'s' get only the
-            // flat viewport-relative ceiling since they have no opposite-edge offset to protect.
+            // See the declaration comment above for why each direction needs its own cap, not a
+            // shared one — every direction has an implicit opposite edge that must stay on-screen.
             maxWidthForE = Math.min(window.innerWidth * 0.9, startRight + startWidth);
-            maxWidthForW = window.innerWidth * 0.9;
+            maxWidthForW = Math.min(window.innerWidth * 0.9, window.innerWidth - startRight);
             maxHeightForN = Math.min(window.innerHeight * 0.9, startTop + startHeight);
-            maxHeightForS = window.innerHeight * 0.9;
+            maxHeightForS = Math.min(window.innerHeight * 0.9, window.innerHeight - startTop);
             handle.setPointerCapture(event.pointerId);
             event.preventDefault();
             // Stop this from also being seen as a header drag-to-move if a handle ever visually
