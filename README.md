@@ -41,5 +41,4 @@ pop full-screen on mobile.
 - Tether or untether — mirror the main roleplay's world, history, and memories live, or keep a
   conversation fully private.
 - Flavor apps write themselves around your story and stay fresh as it moves on.
-- Character portraits resolve automatically — no setup required.
 - Draggable, resizable panel on desktop; clean full-screen sheet on mobile.
