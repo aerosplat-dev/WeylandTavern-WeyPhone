@@ -2,7 +2,7 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, findOrCreateDedicatedAppConversation } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, findOrCreateDedicatedAppConversation, getThreadsFor } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from './lib/generation.js';
 import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, setModeToggleVisible } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
@@ -26,6 +26,7 @@ let currentView = 'home'; // 'home' | 'contacts' | 'conversation' | 'memory'
 let currentConversationId = null;
 let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
 let currentTwitterProfileCharacter = null;
+let currentThreadsFilter = null; // charName string — set when entering the 'threads' view
 const PHONE_APP_LABELS = { chronicle: 'The Chronicle', discord: 'Discord', yikyak: 'Yik Yak' };
 const phoneAppGeneratingIds = new Set(); // tracks which app keys currently have a generation in flight
 const DEFAULT_PHONE_APP_MAX_TOKENS = 1024;
@@ -928,13 +929,57 @@ function openAethelConversation() {
     showScreen('conversation');
 }
 
+// "Start New Thread" — creates a fresh conversation with the SAME character (and, if the current
+// thread happens to be isDedicatedApp-tagged, the same tag — so a new Aethel thread also stays
+// hidden from the general Messages list, matching her existing threads) as the one currently open,
+// WITHOUT touching the existing thread's messages at all (createConversation always makes a
+// brand-new record; nothing here deletes or modifies the current conversation).
+function handleStartNewThread() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, currentConversationId);
+    if (!conversation) return;
+    const options = conversation.isDedicatedApp ? { isDedicatedApp: conversation.isDedicatedApp } : {};
+    const newConversation = createConversation(settings, conversation.charName, options);
+    context.saveSettingsDebounced();
+    currentConversationId = newConversation.id;
+    showScreen('conversation');
+}
+
+// "Switch Threads" — navigates to a filtered thread list (via the SAME renderMessagesScreen used
+// by the Messages screen, just fed a differently-filtered summaries array) for whichever character
+// the currently open conversation belongs to. Purely charName-based — works identically for Aethel
+// and every regular character, no isDedicatedApp branching here at all.
+function handleSwitchThreads() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, currentConversationId);
+    if (!conversation) return;
+    currentThreadsFilter = conversation.charName;
+    showScreen('threads');
+}
+
 function handleDeleteConversation(id) {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
+    // Capture whether the conversation being deleted was itself isDedicatedApp-tagged BEFORE
+    // deleting it — needed below to pick a sensible fallback screen if this was this character's
+    // very last thread, since deleteConversation removes the record this info lives on.
+    const deletedConversation = getConversation(settings, id);
+    const wasDedicatedApp = !!deletedConversation?.isDedicatedApp;
     deleteConversation(settings, id);
     context.saveSettingsDebounced();
     if (currentConversationId === id) {
         currentConversationId = null;
+    }
+    if (currentView === 'threads') {
+        const remaining = getThreadsFor(settings, currentThreadsFilter ?? '');
+        if (remaining.length === 0) {
+            showScreen(wasDedicatedApp ? 'home' : 'messages');
+        } else {
+            showScreen('threads');
+        }
+        return;
     }
     showScreen('messages');
 }
@@ -1046,6 +1091,18 @@ function handleScreenBodyClick(event) {
     if (selectMenuItem) {
         closeRegenerateMenu();
         handleEnterSelectMode();
+        return;
+    }
+    const newThreadMenuItem = event.target.closest('.wp-popup-menu-item[data-action="new-thread"]');
+    if (newThreadMenuItem) {
+        closeRegenerateMenu();
+        handleStartNewThread();
+        return;
+    }
+    const switchThreadsMenuItem = event.target.closest('.wp-popup-menu-item[data-action="switch-threads"]');
+    if (switchThreadsMenuItem) {
+        closeRegenerateMenu();
+        handleSwitchThreads();
         return;
     }
     const memoryAddBtn = event.target.closest('#wp-memory-add-button');
@@ -1189,6 +1246,15 @@ function showScreen(view) {
         title.textContent = 'Messages';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         renderMessagesScreenNow(context, settings);
+        return;
+    }
+
+    if (view === 'threads') {
+        title.textContent = `${currentThreadsFilter ?? ''} Threads`;
+        const summaries = withTypingState(getThreadsFor(settings, currentThreadsFilter ?? ''), generatingConversationIds);
+        const portraitMap = buildPortraitMap(context.characters, [currentThreadsFilter], context.getThumbnailUrl);
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[currentThreadsFilter]);
+        renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
         return;
     }
 
