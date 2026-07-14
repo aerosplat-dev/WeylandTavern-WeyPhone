@@ -592,6 +592,11 @@
     border-left-color: #6b74d6;
 }
 
+.wp-discord-username {
+    font-weight: 700;
+    color: var(--SmartThemeBodyColor, #fff);
+}
+
 .wp-discord-server-tag {
     display: inline-block;
     font-size: 9px;
