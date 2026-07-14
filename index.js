@@ -1150,8 +1150,7 @@ function showScreen(view) {
         title.textContent = 'Home';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         const flavorAppsEnabled = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
-        const athelEnabled = context.characters.some(c => c.name === 'Aethel');
-        renderAppGridScreen(screenBody, { flavorAppsEnabled, athelEnabled });
+        renderAppGridScreen(screenBody, { flavorAppsEnabled });
         return;
     }
 
