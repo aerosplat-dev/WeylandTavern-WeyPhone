@@ -1218,15 +1218,13 @@ function handleScreenBodyChange(event) {
 // Shared staleness-check-and-conditionally-regenerate for the phone-app / twitter-feed /
 // twitter-profile views: if this app's cached content was generated against a different main-chat
 // message count than the live one, kick off a fresh generation (unless one is already in flight)
-// rather than requiring the user to notice and tap refresh. `alsoIfMissing` additionally triggers
-// a generation when there's no cached entry AT ALL yet — opt-in (defaults false, preserving the
-// existing Home-tile-driven apps' behavior of just showing "Tap Refresh" on a first, never-visited
-// screen) and currently only passed for the twitter-profile view, since that's the one reached by
-// an explicit click-through (a following-list item, or a feed post's avatar/name) where landing on
-// an empty page and having to tap Refresh yourself would be a needless extra step.
-function regenerateFlavorAppIfStale(context, settings, { cacheKey, trackingSet, regenerate, alsoIfMissing = false }) {
+// rather than requiring the user to notice and tap refresh. A screen with no cached entry at all
+// yet is deliberately NOT auto-generated here — every one of these screens (including
+// twitter-profile, reached via a Following-list item or a feed post's avatar/name) requires an
+// explicit first tap of Refresh, same as Chronicle/Discord/Yik Yak/the Twitter feed.
+function regenerateFlavorAppIfStale(context, settings, { cacheKey, trackingSet, regenerate }) {
     const entry = getPhoneAppContent(settings, context.chatId, cacheKey);
-    const isStale = entry ? entry.chatMessageCountAtGeneration !== context.chat.length : alsoIfMissing;
+    const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
     if (isStale && !trackingSet.has(cacheKey)) {
         regenerate();
     }
@@ -1315,7 +1313,6 @@ function showScreen(view) {
             cacheKey: twitterCacheKey('profile', currentTwitterProfileCharacter),
             trackingSet: twitterGeneratingKeys,
             regenerate: () => runTwitterGeneration('profile', currentTwitterProfileCharacter),
-            alsoIfMissing: true,
         });
         return;
     }
