@@ -27,12 +27,10 @@ pop full-screen on mobile.
 ## Apps
 
 - **Messages** — Text anyone, anytime. Every character in your roster, one tap away.
-- **The Chronicle** — Weyland University's paper of record. Campus news, printed the way campus
-  news should read.
+- **Weyland Chronicle** — The city and the university, held to account, one headline at a time.
 - **Twitter** — Everyone's already posting. Follow your favorites, or just watch the timeline burn.
 - **Discord** — Every server has that one channel. Drop into the chaos, channel by channel.
-- **Yik Yak** — Anonymous, hyperlocal, completely unfiltered. Nobody knows who's posting.
-  Everybody has a guess.
+- **Yik Yak** — Hyperlocal and completely unfiltered. Nobody knows who's posting. Everybody has a guess.
 - **Aethel: The Game** — Meet Aethel, living in her own dedicated app — right where she belongs.
 
 ## Features
