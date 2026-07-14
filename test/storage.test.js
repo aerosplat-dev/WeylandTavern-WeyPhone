@@ -543,8 +543,8 @@ test('migrateTetheredFields does not overwrite existing tethered data', () => {
 
 test('createConversation with isDedicatedApp tags the conversation record', () => {
     const settings = { conversations: {} };
-    const conv = createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
-    assert.equal(conv.isDedicatedApp, 'athel');
+    const conv = createConversation(settings, 'Aethel', { isDedicatedApp: 'aethel' });
+    assert.equal(conv.isDedicatedApp, 'aethel');
 });
 
 test('createConversation without options has no isDedicatedApp tag', () => {
@@ -556,7 +556,7 @@ test('createConversation without options has no isDedicatedApp tag', () => {
 test('getAllConversationSummaries excludes conversations tagged with isDedicatedApp', () => {
     const settings = { conversations: {} };
     createConversation(settings, 'Blake');
-    createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
+    createConversation(settings, 'Aethel', { isDedicatedApp: 'aethel' });
     const summaries = getAllConversationSummaries(settings);
     assert.equal(summaries.length, 1);
     assert.equal(summaries[0].charName, 'Blake');
@@ -564,8 +564,8 @@ test('getAllConversationSummaries excludes conversations tagged with isDedicated
 
 test('findOrCreateDedicatedAppConversation creates one on first call, reuses it on subsequent calls', () => {
     const settings = { conversations: {} };
-    const first = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'athel');
-    const second = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'athel');
+    const first = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'aethel');
+    const second = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'aethel');
     assert.equal(first.id, second.id);
     assert.equal(Object.keys(settings.conversations).length, 1);
 });
@@ -573,15 +573,15 @@ test('findOrCreateDedicatedAppConversation creates one on first call, reuses it 
 test('findOrCreateDedicatedAppConversation reuses an existing untagged conversation for the same charName, via the unified charName-based lookup (Task 8 design change: thread identity is charName-only, isDedicatedApp no longer gates lookup)', () => {
     const settings = { conversations: {} };
     const existing = createConversation(settings, 'Aethel'); // untagged, e.g. a pre-existing regular thread
-    const found = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'athel');
+    const found = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'aethel');
     assert.equal(found.id, existing.id);
     assert.equal(Object.keys(settings.conversations).length, 1);
 });
 
 test('getThreadsFor returns ALL threads for a character, including isDedicatedApp-tagged ones', () => {
     const settings = { conversations: {} };
-    createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
-    createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
+    createConversation(settings, 'Aethel', { isDedicatedApp: 'aethel' });
+    createConversation(settings, 'Aethel', { isDedicatedApp: 'aethel' });
     createConversation(settings, 'Blake');
     const threads = getThreadsFor(settings, 'Aethel');
     assert.equal(threads.length, 2);
@@ -600,8 +600,8 @@ test('getThreadsFor sorts most-recent-first', () => {
 
 test('findMostRecentThread returns the most recently active match regardless of isDedicatedApp tagging', () => {
     const settings = { conversations: {} };
-    const first = createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
-    const second = createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
+    const first = createConversation(settings, 'Aethel', { isDedicatedApp: 'aethel' });
+    const second = createConversation(settings, 'Aethel', { isDedicatedApp: 'aethel' });
     first.lastActive = second.lastActive + 1000;
     const found = findMostRecentThread(settings, 'Aethel');
     assert.equal(found.id, first.id);
@@ -614,9 +614,9 @@ test('findMostRecentThread returns undefined for a character with no threads at 
 
 test('findOrCreateDedicatedAppConversation resumes the most recently active thread via the unified lookup, not just the first one found', () => {
     const settings = { conversations: {} };
-    const first = createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
-    const second = createConversation(settings, 'Aethel', { isDedicatedApp: 'athel' });
+    const first = createConversation(settings, 'Aethel', { isDedicatedApp: 'aethel' });
+    const second = createConversation(settings, 'Aethel', { isDedicatedApp: 'aethel' });
     first.lastActive = second.lastActive + 1000;
-    const found = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'athel');
+    const found = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'aethel');
     assert.equal(found.id, first.id);
 });

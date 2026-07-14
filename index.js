@@ -933,7 +933,7 @@ function openAethelConversation() {
         return;
     }
     const settings = getSettings(context.extensionSettings);
-    const conversation = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'athel');
+    const conversation = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'aethel');
     context.saveSettingsDebounced();
     currentConversationId = conversation.id;
     showScreen('conversation');
@@ -1047,7 +1047,7 @@ function handleScreenBodyClick(event) {
             showScreen('messages');
         } else if (appKey === 'twitter') {
             showScreen('twitter-feed');
-        } else if (appKey === 'athel') {
+        } else if (appKey === 'aethel') {
             openAethelConversation();
         } else {
             currentPhoneApp = appKey;
