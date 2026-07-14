@@ -1529,6 +1529,16 @@ function updateTetheredToggleAvailability() {
     if (modeToggleLabel) setModeToggleVisible(modeToggleLabel, !isDedicatedApp);
 }
 
+// Re-renders the Home app grid (recomputing which flavor tiles should be enabled/disabled) if
+// it's currently the visible screen — called on the same CHAT_CHANGED event as
+// updateTetheredToggleAvailability, so activating/deactivating a main roleplay chat updates the
+// grid live. Previously only showScreen('home') itself recomputed flavorAppsEnabled, so the grid
+// stayed stuck at whatever it was when the panel was last opened until it was closed and reopened.
+function refreshHomeScreenAvailability() {
+    if (currentView !== 'home') return;
+    showScreen('home');
+}
+
 function initPanel() {
     ensurePortal().insertAdjacentHTML('beforeend', createPanelMarkup());
 
@@ -1581,6 +1591,7 @@ function initPanel() {
     updateTetheredToggleAvailability();
     const context = SillyTavern.getContext();
     context.eventSource.on(context.eventTypes.CHAT_CHANGED, updateTetheredToggleAvailability);
+    context.eventSource.on(context.eventTypes.CHAT_CHANGED, refreshHomeScreenAvailability);
 
     // Closes the Regenerate popup menu on any click outside it — the menu's own toggle/item
     // clicks are handled inside handleScreenBodyClick above and are excluded here since they

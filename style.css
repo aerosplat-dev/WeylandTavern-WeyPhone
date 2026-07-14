@@ -408,12 +408,17 @@
     cursor: not-allowed;
 }
 
+/* No overflow-y of its own — this used to have its own internal scroll, which meant the "Refreshed
+   <time>" meta line (a sibling above this element, not a descendant) stayed pinned in place while
+   only this content scrolled underneath it, unlike Twitter's own feed content (which has never had
+   an inner scroll of its own and always scrolled together with its meta line inside the shared
+   #wp-screen-body). Letting #wp-screen-body handle all the scrolling here too makes the meta line
+   scroll away with the rest of the content for every app, matching Twitter's behavior everywhere. */
 #wp-phone-app-content {
     padding: 8px 16px;
     display: flex;
     flex-direction: column;
     gap: 12px;
-    overflow-y: auto;
 }
 
 .wp-phone-app-section-title {
@@ -429,6 +434,13 @@
     color: var(--SmartThemeBodyColor, #fff);
     padding: 6px 0;
     border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
+}
+
+.wp-chronicle-headline {
+    display: block;
+    font-weight: 700;
+    color: var(--SmartThemeBodyColor, #fff);
+    margin-bottom: 2px;
 }
 
 .wp-phone-app-timestamp {

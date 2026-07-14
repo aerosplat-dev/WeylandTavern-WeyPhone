@@ -202,3 +202,23 @@ test('parsePhoneAppOutput still strips genuine **bold**-wrapped emphasis markers
     assert.equal(text, '@luckypaww posted an update');
     assert.doesNotMatch(text, /\*\*/);
 });
+
+// Chronicle's own headline+summary convention: "- **Short Headline** rest of the sentence." The
+// leading bold span's inner text is captured separately as boldPrefix (for the renderer to
+// visually distinguish it) while item.text still has ALL emphasis markers stripped as before,
+// unchanged for callers that don't care about boldPrefix (e.g. Discord/Yik Yak's own renderer).
+test('parsePhoneAppOutput captures a leading bold span as boldPrefix, item.text stays fully unwrapped', () => {
+    const input = '## HEADLINES\n- **City Council Approves Waterfront Rezoning** After a three-hour session, the council cleared the way for development.';
+    const result = parsePhoneAppOutput(input);
+    const item = result.sections[0].items[0];
+    assert.equal(item.boldPrefix, 'City Council Approves Waterfront Rezoning');
+    assert.equal(item.text, 'City Council Approves Waterfront Rezoning After a three-hour session, the council cleared the way for development.');
+    assert.doesNotMatch(item.text, /\*\*/);
+});
+
+test('parsePhoneAppOutput omits boldPrefix entirely when an item has no leading bold span', () => {
+    const input = '## WEYLAND ALERTS\n- Weather advisory: light rain expected after 2AM.';
+    const result = parsePhoneAppOutput(input);
+    const item = result.sections[0].items[0];
+    assert.equal(item.boldPrefix, undefined);
+});
