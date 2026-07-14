@@ -15,7 +15,7 @@ test('buildPortraitMap resolves both a weybooru primary URL and a local fallback
     assert.equal(map.Blake.initial, null);
 });
 
-test('buildPortraitMap lowercases multi-word... single-token names correctly for the weybooru URL', () => {
+test('buildPortraitMap lowercases a single-word name correctly for the weybooru URL', () => {
     const characters = [{ name: 'Kris', avatar: 'kris.png' }];
     const getThumbnailUrl = (type, file) => `/thumbnail/${type}/${file}`;
     const map = buildPortraitMap(characters, ['Kris'], getThumbnailUrl);
@@ -48,10 +48,18 @@ test('buildPortraitMap falls back to an uppercase initial (with a weybooru URL s
     const characters = [{ name: 'Rosa', avatar: 'rosa.png' }];
     const map = buildPortraitMap(characters, ['Deleted Character'], fakeGetThumbnailUrl);
     assert.deepEqual(map['Deleted Character'], {
-        primaryUrl: 'https://cast.weybooru.com/images/portraits/deleted character.jpg',
+        primaryUrl: 'https://cast.weybooru.com/images/portraits/deleted.jpg',
         fallbackUrl: null,
         initial: 'D',
     });
+});
+
+test('buildPortraitMap uses only the first word of a multi-word name for the weybooru URL, lowercased', () => {
+    // Weybooru portrait filenames are lowercase first names only — a multi-word character like
+    // "Kinsbane Manor" has its portrait filed under "kinsbane.jpg", not the full name.
+    const map = buildPortraitMap([], ['Kinsbane Manor', 'Mirror Weyland'], fakeGetThumbnailUrl);
+    assert.equal(map['Kinsbane Manor'].primaryUrl, 'https://cast.weybooru.com/images/portraits/kinsbane.jpg');
+    assert.equal(map['Mirror Weyland'].primaryUrl, 'https://cast.weybooru.com/images/portraits/mirror.jpg');
 });
 
 test('buildPortraitMap resolves multiple char names independently', () => {
