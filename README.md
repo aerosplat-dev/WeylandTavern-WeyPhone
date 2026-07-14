@@ -1,6 +1,6 @@
 # WeyPhone
 
-<img src="assets/screenshots/home-screen.png" width="220" alt="Home screen" />
+<p align="center"><img src="assets/screenshots/home-screen.png" width="340" alt="Home screen" /></p>
 
 WeyPhone drops a fully-functional phone into your pocket during any Weyland Tavern roleplay —
 text your characters in a private side-channel, browse a handful of campus-life social apps that
@@ -9,18 +9,18 @@ pop full-screen on mobile.
 
 <table>
 <tr>
-<td><img src="assets/screenshots/messages-list.png" width="180" alt="Messages list" /></td>
-<td><img src="assets/screenshots/conversation.png" width="180" alt="A conversation" /></td>
-<td><img src="assets/screenshots/conversation-options-menu.png" width="180" alt="Options menu" /></td>
-<td><img src="assets/screenshots/memories.png" width="180" alt="Memories" /></td>
-<td><img src="assets/screenshots/chronicle.png" width="180" alt="The Chronicle" /></td>
+<td><a href="assets/screenshots/messages-list.png"><img src="assets/screenshots/messages-list.png" width="180" alt="Messages list" /></a></td>
+<td><a href="assets/screenshots/conversation.png"><img src="assets/screenshots/conversation.png" width="180" alt="A conversation" /></a></td>
+<td><a href="assets/screenshots/conversation-options-menu.png"><img src="assets/screenshots/conversation-options-menu.png" width="180" alt="Options menu" /></a></td>
+<td><a href="assets/screenshots/memories.png"><img src="assets/screenshots/memories.png" width="180" alt="Memories" /></a></td>
+<td><a href="assets/screenshots/chronicle.png"><img src="assets/screenshots/chronicle.png" width="180" alt="The Chronicle" /></a></td>
 </tr>
 <tr>
-<td><img src="assets/screenshots/discord.png" width="180" alt="Discord" /></td>
-<td><img src="assets/screenshots/yikyak.png" width="180" alt="Yik Yak" /></td>
-<td><img src="assets/screenshots/twitter-feed.png" width="180" alt="Twitter feed" /></td>
-<td><img src="assets/screenshots/twitter-following.png" width="180" alt="Twitter following list" /></td>
-<td><img src="assets/screenshots/twitter-profile.png" width="180" alt="Twitter profile" /></td>
+<td><a href="assets/screenshots/discord.png"><img src="assets/screenshots/discord.png" width="180" alt="Discord" /></a></td>
+<td><a href="assets/screenshots/yikyak.png"><img src="assets/screenshots/yikyak.png" width="180" alt="Yik Yak" /></a></td>
+<td><a href="assets/screenshots/twitter-feed.png"><img src="assets/screenshots/twitter-feed.png" width="180" alt="Twitter feed" /></a></td>
+<td><a href="assets/screenshots/twitter-following.png"><img src="assets/screenshots/twitter-following.png" width="180" alt="Twitter following list" /></a></td>
+<td><a href="assets/screenshots/twitter-profile.png"><img src="assets/screenshots/twitter-profile.png" width="180" alt="Twitter profile" /></a></td>
 </tr>
 </table>
 
