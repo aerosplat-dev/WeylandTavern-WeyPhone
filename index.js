@@ -1399,6 +1399,94 @@ function initPanelDrag(panel, headerEl) {
     }
 }
 
+// Desktop-only 8-direction custom resize, replacing native CSS `resize: both` (which only offered
+// a single browser-fixed bottom-right handle that grows in document-flow terms — but this panel is
+// positioned via `right`, not `left`, so growing width via native resize pushed the LEFT edge
+// outward while the right edge stayed pinned, reading as "grows toward the left" and fighting the
+// cursor instead of tracking it). Each of the 8 handle elements below lets its own edge/corner
+// track the cursor directly, with the OPPOSITE edge staying fixed — standard desktop window-
+// manager resize behavior. No matchMedia guard is needed here the way initPanelDrag needs one on
+// its own always-visible header: the 8 handle elements are display:none below the 601px breakpoint
+// (see style.css), and a hidden element never receives pointer events, so this is inert on mobile
+// by construction.
+function initPanelResize(panel) {
+    const MIN_WIDTH = 280;
+    const MIN_HEIGHT = 320;
+    let resizingDir = null;
+    let startX = 0;
+    let startY = 0;
+    let startTop = 0;
+    let startRight = 0;
+    let startWidth = 0;
+    let startHeight = 0;
+    let maxWidth = 0;
+    let maxHeight = 0;
+
+    panel.querySelectorAll('.wp-resize-handle').forEach((handle) => {
+        const dir = handle.dataset.dir;
+
+        handle.addEventListener('pointerdown', (event) => {
+            resizingDir = dir;
+            startX = event.clientX;
+            startY = event.clientY;
+            const rect = panel.getBoundingClientRect();
+            const portalRect = panel.offsetParent.getBoundingClientRect();
+            startTop = rect.top - portalRect.top;
+            startRight = portalRect.right - rect.right;
+            startWidth = rect.width;
+            startHeight = rect.height;
+            maxWidth = window.innerWidth * 0.9;
+            maxHeight = window.innerHeight * 0.9;
+            handle.setPointerCapture(event.pointerId);
+            event.preventDefault();
+            // Stop this from also being seen as a header drag-to-move if a handle ever visually
+            // overlaps the header (the north handle sits right at the header's top edge) — resize
+            // and move must never both fire for the same gesture.
+            event.stopPropagation();
+        });
+
+        handle.addEventListener('pointermove', (event) => {
+            if (resizingDir !== dir) return;
+            const deltaX = event.clientX - startX;
+            const deltaY = event.clientY - startY;
+            let newTop = startTop;
+            let newRight = startRight;
+            let newWidth = startWidth;
+            let newHeight = startHeight;
+
+            // Each edge tracks the cursor directly; the opposite edge/corner stays fixed. See the
+            // task brief this function was built from for the full derivation — summary: for 'e'/'n'
+            // (the edges where the far side is expressed via a separate top/right offset rather
+            // than being implicit), the offset must move by however much the size ACTUALLY changed
+            // (post-clamp), not by the raw cursor delta, so the fixed opposite edge stays truly
+            // fixed even when a resize hits the min/max clamp.
+            if (dir.includes('e')) {
+                newWidth = Math.min(Math.max(startWidth + deltaX, MIN_WIDTH), maxWidth);
+                newRight = startRight - (newWidth - startWidth);
+            }
+            if (dir.includes('w')) {
+                newWidth = Math.min(Math.max(startWidth - deltaX, MIN_WIDTH), maxWidth);
+            }
+            if (dir.includes('n')) {
+                newHeight = Math.min(Math.max(startHeight - deltaY, MIN_HEIGHT), maxHeight);
+                newTop = startTop - (newHeight - startHeight);
+            }
+            if (dir.includes('s')) {
+                newHeight = Math.min(Math.max(startHeight + deltaY, MIN_HEIGHT), maxHeight);
+            }
+
+            panel.style.top = `${Math.max(0, newTop)}px`;
+            panel.style.right = `${Math.max(0, newRight)}px`;
+            panel.style.width = `${newWidth}px`;
+            panel.style.height = `${newHeight}px`;
+        });
+
+        const endResize = () => { if (resizingDir === dir) resizingDir = null; };
+        handle.addEventListener('pointerup', endResize);
+        handle.addEventListener('pointercancel', endResize);
+    });
+}
+
 // Re-evaluates whether a main roleplay is currently active and syncs the tethered toggle's
 // disabled state accordingly — called once on load and again every time SillyTavern's own
 // CHAT_CHANGED event fires, so switching characters/chats in the main window updates the toggle
@@ -1437,6 +1525,7 @@ function initPanel() {
     const composeButton = document.getElementById('wp-compose-button');
 
     initPanelDrag(panel, document.getElementById('wp-panel-header'));
+    initPanelResize(panel);
 
     // On narrow/mobile viewports the panel becomes a full-screen sheet (see style.css) and can
     // visually cover the toggle button, so open/close state is tracked explicitly here rather
