@@ -700,8 +700,18 @@ async function generateReply(conversationId, conversation, context, settings) {
 
         const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
         const profileId = resolveProfileId(settings, activeProfileId);
+        // A Connection Profile's own `model` field is a snapshot from whenever it was last saved —
+        // ConnectionManagerRequestService.sendRequest always sends that saved value, not whatever
+        // model is actually live/selected in SillyTavern's main chat completion settings right now
+        // (context.getChatCompletionModel()). Messages/Aethel are meant to always track the live
+        // main-chat model, so it's passed as an overridePayload — sendRequest spreads this over the
+        // profile's own defaults, letting api-url/auth/preset still come from the pinned profile
+        // while the model itself stays live. Falls back to the profile's own (possibly stale) model
+        // if the live model can't be resolved for any reason, rather than sending a broken override.
+        const liveModel = context.getChatCompletionModel?.();
+        const overridePayload = liveModel ? { model: liveModel } : undefined;
         const result = await sendMessage({
-            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_MAX_TOKENS),
+            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_MAX_TOKENS, undefined, overridePayload),
             profileId,
             messages,
         });
