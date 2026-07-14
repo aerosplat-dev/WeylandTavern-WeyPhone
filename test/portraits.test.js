@@ -22,17 +22,36 @@ test('buildPortraitMap lowercases multi-word... single-token names correctly for
     assert.equal(map.Kris.primaryUrl, 'https://cast.weybooru.com/images/portraits/kris.jpg');
 });
 
-test('buildPortraitMap falls back to initial-only for an unknown/deleted character', () => {
+test('buildPortraitMap still attempts a weybooru URL for a name with no local character match, falling back to an initial only if that also fails', () => {
     const map = buildPortraitMap([], ['Ghost'], () => '/x');
-    assert.equal(map.Ghost.primaryUrl, null);
+    assert.equal(map.Ghost.primaryUrl, 'https://cast.weybooru.com/images/portraits/ghost.jpg');
     assert.equal(map.Ghost.fallbackUrl, null);
     assert.equal(map.Ghost.initial, 'G');
 });
 
-test('buildPortraitMap falls back to an uppercase initial when the character cannot be found', () => {
+test('buildPortraitMap resolves a weybooru URL for a real platform roster name even with no matching local character card installed', () => {
+    // Regression test: Fasti/Gem/Lyris are real Weyland roster characters whose weybooru portraits
+    // load fine, but none has a standalone local SillyTavern character card under that exact name
+    // (Gem's local card is filed as "Gemini"; Fasti and Lyris have no standalone card at all,
+    // Lyris only exists inside a combined "Lyris & Vesper" card) — previously this meant no
+    // portrait was ever attempted for them at all, a real bug fixed by decoupling the weybooru
+    // attempt from local-character-lookup success.
+    const characters = [{ name: 'Rosa', avatar: 'rosa.png' }];
+    const map = buildPortraitMap(characters, ['Fasti', 'Gem', 'Lyris'], fakeGetThumbnailUrl);
+    assert.equal(map.Fasti.primaryUrl, 'https://cast.weybooru.com/images/portraits/fasti.jpg');
+    assert.equal(map.Fasti.fallbackUrl, null);
+    assert.equal(map.Gem.primaryUrl, 'https://cast.weybooru.com/images/portraits/gem.jpg');
+    assert.equal(map.Lyris.primaryUrl, 'https://cast.weybooru.com/images/portraits/lyris.jpg');
+});
+
+test('buildPortraitMap falls back to an uppercase initial (with a weybooru URL still attempted) when the character cannot be found locally', () => {
     const characters = [{ name: 'Rosa', avatar: 'rosa.png' }];
     const map = buildPortraitMap(characters, ['Deleted Character'], fakeGetThumbnailUrl);
-    assert.deepEqual(map['Deleted Character'], { primaryUrl: null, fallbackUrl: null, initial: 'D' });
+    assert.deepEqual(map['Deleted Character'], {
+        primaryUrl: 'https://cast.weybooru.com/images/portraits/deleted character.jpg',
+        fallbackUrl: null,
+        initial: 'D',
+    });
 });
 
 test('buildPortraitMap resolves multiple char names independently', () => {
