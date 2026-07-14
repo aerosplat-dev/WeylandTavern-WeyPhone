@@ -68,6 +68,13 @@ test('applySpecialCase leaves Aiko unchanged when mcyYear is Freshman', () => {
     assert.equal(applySpecialCase('Aiko', 'base text', { mcyYear: 'Freshman' }), 'base text');
 });
 
+test('applySpecialCase renders the Aiko sentence without a double space when mcyMinusTwoYear is undefined', () => {
+    // Regression: `starting her ${undefined ?? ''} year` used to produce "starting her  year".
+    const result = applySpecialCase('Aiko', 'base text', { mcyYear: 'Junior' });
+    assert.equal(result, 'Aiko attends Weyland University Monday-Friday. Aiko is now starting her year of Demonology at Weyland.\nbase text');
+    assert.doesNotMatch(result, /  /, 'no double space anywhere in the assembled sentence');
+});
+
 test('applySpecialCase adds Willow expressive text only when weepingWillow is true', () => {
     assert.equal(applySpecialCase('Willow', 'base', { weepingWillow: true, expressWillowText: 'extra' }), 'base\nextra');
     assert.equal(applySpecialCase('Willow', 'base', { weepingWillow: false }), 'base');

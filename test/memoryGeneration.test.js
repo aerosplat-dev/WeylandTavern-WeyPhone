@@ -41,7 +41,30 @@ test('buildMemoryGenerationMessages omits the personality section when empty', (
         userName: 'Ava',
         formatClockTime: () => '',
     });
-    assert.doesNotMatch(messages[0].content, /\n\n\n/);
+    // The personality section is joined LAST, with '\n\n'. If an empty personality still leaked
+    // in as a third section, the content would end with a trailing separator instead of the
+    // instruction sentence. Assert it ends exactly at the instruction section (nothing appended)
+    // and that there are exactly two '\n\n'-joined sections (neither of which contains an
+    // internal '\n\n'), which together prove no personality content was included.
+    assert.ok(
+        messages[0].content.endsWith('just plain prose, like a brief diary entry.'),
+        'with empty personality, the system prompt must end at the instruction section',
+    );
+    assert.equal(messages[0].content.split('\n\n').length, 2);
+});
+
+test('buildMemoryGenerationMessages appends the personality section verbatim when present', () => {
+    // Positive contrast to the "omits when empty" case: a distinctive personality string is the
+    // third '\n\n'-joined section and appears verbatim at the end.
+    const messages = buildMemoryGenerationMessages({
+        charName: 'Rosa',
+        personalityText: 'ZZ_DISTINCTIVE_PERSONALITY_ZZ',
+        windowMessages: [],
+        userName: 'Ava',
+        formatClockTime: () => '',
+    });
+    assert.ok(messages[0].content.endsWith('ZZ_DISTINCTIVE_PERSONALITY_ZZ'));
+    assert.equal(messages[0].content.split('\n\n').length, 3);
 });
 
 test('buildMemoryGenerationMessages user message contains the phone-format transcript of the window', () => {

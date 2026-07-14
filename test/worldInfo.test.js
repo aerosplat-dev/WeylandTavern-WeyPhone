@@ -29,6 +29,27 @@ test('scanEntries is case-insensitive', () => {
     assert.equal(scanEntries(entries, history), 'Matched');
 });
 
+test('scanEntries does not match a non-constant entry whose key is undefined (guarded by `entry.key ?? []`)', () => {
+    const entries = [{ content: 'No key at all', disable: false, constant: false }];
+    const history = [{ role: 'user', content: 'some text mentioning anything' }];
+    assert.equal(scanEntries(entries, history), '');
+});
+
+test('scanEntries skips non-string key elements without throwing (guarded by `typeof key === "string"`)', () => {
+    const entries = [{ key: [123, null, undefined, { nested: true }], content: 'Should not match', disable: false, constant: false }];
+    const history = [{ role: 'user', content: 'text containing 123 and other things' }];
+    // No throw, and none of the non-string keys spuriously match.
+    assert.equal(scanEntries(entries, history), '');
+});
+
+test('scanEntries treats an empty-string key as a non-match, not a match-everything (guarded by `key.length > 0`)', () => {
+    // text.includes('') is always true; the length guard is exactly what prevents an empty key
+    // from matching every possible history.
+    const entries = [{ key: [''], content: 'Should not match on empty key', disable: false, constant: false }];
+    const history = [{ role: 'user', content: 'any non-empty history text' }];
+    assert.equal(scanEntries(entries, history), '');
+});
+
 test('resolveWorldInfoTethered converts history into a newest-first plain string[] before calling getWorldInfoPrompt', async () => {
     const fakeGetWorldInfoPrompt = async (chat, maxContext, isDryRun, globalScanData) => {
         assert.deepEqual(chat, ['third', 'second', 'first']);
@@ -144,6 +165,37 @@ test('resolveWorldInfoUntethered works with no persona lorebook set', async () =
         loadWorldInfo: fakeLoadWorldInfo,
         history: [],
         personaLorebookName: '',
+    });
+    assert.equal(result.worldInfoBefore, 'Weyland lore');
+});
+
+// Documents CURRENT behavior (not an endorsement of it — see report). resolveWorldInfoUntethered
+// has no try/catch around loadWorldInfo, so a throw propagates to the caller and aborts the reply.
+// This is asymmetric with resolveMainActiveLtmEntries (tetheredContext.js), which catches and
+// degrades to []. Flagged for a human decision; behavior deliberately left unchanged here.
+test('resolveWorldInfoUntethered propagates the error when loadWorldInfo throws (currently unguarded)', async () => {
+    const fakeLoadWorldInfo = async () => { throw new Error('book load failed'); };
+    await assert.rejects(
+        () => resolveWorldInfoUntethered({ loadWorldInfo: fakeLoadWorldInfo, history: [], personaLorebookName: '' }),
+        /book load failed/,
+    );
+});
+
+test('resolveWorldInfoUntethered treats a null book as empty (skips it, yielding no WI text)', async () => {
+    const fakeLoadWorldInfo = async () => null;
+    const result = await resolveWorldInfoUntethered({ loadWorldInfo: fakeLoadWorldInfo, history: [], personaLorebookName: '' });
+    assert.deepEqual(result, { worldInfoBefore: '', worldInfoAfter: '' });
+});
+
+test('resolveWorldInfoUntethered skips a null persona book but still returns the Weyland scan', async () => {
+    const books = {
+        Weyland: { entries: { 0: { key: ['always'], content: 'Weyland lore', disable: false, constant: true } } },
+    };
+    const fakeLoadWorldInfo = async (name) => books[name] ?? null;
+    const result = await resolveWorldInfoUntethered({
+        loadWorldInfo: fakeLoadWorldInfo,
+        history: [],
+        personaLorebookName: 'Missing Persona Book',
     });
     assert.equal(result.worldInfoBefore, 'Weyland lore');
 });

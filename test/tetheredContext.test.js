@@ -27,8 +27,13 @@ test('isMainRoleplayActive treats characterId 0 as a valid selection, not falsy-
     assert.equal(isMainRoleplayActive({ characterId: 0, groupId: undefined }), true);
 });
 
-test('resolveMainActiveLtmEntries returns [] when no book is bound in chatMetadata', async () => {
-    const loadWorldInfo = async () => { throw new Error('should not be called'); };
+// NOTE: there is no reachable "never calls loadWorldInfo" path — resolveMainActiveLtmEntries
+// always resolves a book name (chatMetadata.world_info or the sanitized "Chat Book <chatId>"
+// fallback) and always calls loadWorldInfo with it. With chatMetadata:{} the fallback name still
+// resolves, loadWorldInfo IS called, and if it throws the catch returns []. This exercises the
+// error/catch path, not a true no-binding path.
+test('resolveMainActiveLtmEntries returns [] when the resolved book fails to load', async () => {
+    const loadWorldInfo = async () => { throw new Error('simulated loadWorldInfo failure'); };
     const result = await resolveMainActiveLtmEntries({ loadWorldInfo, chatMetadata: {}, chatId: 'chat_1' });
     assert.deepEqual(result, []);
 });
