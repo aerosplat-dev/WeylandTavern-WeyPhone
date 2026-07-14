@@ -3,7 +3,7 @@ import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/charact
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, findOrCreateDedicatedAppConversation, getThreadsFor } from './lib/storage.js';
-import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from './lib/generation.js';
+import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
 import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, setModeToggleVisible } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
@@ -353,7 +353,7 @@ async function runFlavorAppGeneration({ trackingSet, trackingKey, rerender, buil
             messages,
         });
 
-        const rawText = typeof result === 'string' ? result : (result?.content ?? '');
+        const rawText = extractResponseText(result);
         const { content, usable } = parse(rawText);
         if (!usable) {
             toastr.warning('The model did not return usable content this time.', 'WeyPhone');
@@ -592,7 +592,7 @@ async function generateMemory(conversationId, conversation, context, settings, o
             backupModel: conversation.memoryBackupModel,
         });
 
-        const memoryText = typeof result === 'string' ? result : (result?.content ?? '');
+        const memoryText = extractResponseText(result);
         if (memoryText.trim()) {
             if (replaceMemoryId) {
                 editMemory(settings, conversationId, replaceMemoryId, memoryText.trim());
@@ -645,9 +645,7 @@ async function generateReply(conversationId, conversation, context, settings) {
         const pinnedMemories = getPinnedMemories(settings, conversationId);
         const memoryBlock = joinMemoriesForInjection(pinnedMemories);
         const tetheredBlock = await buildTetheredContext(context, conversation);
-        const worldInfoAfterWithMemory = [worldInfo.worldInfoAfter, memoryBlock, tetheredBlock]
-            .filter(section => typeof section === 'string' && section.trim().length > 0)
-            .join('\n\n');
+        const worldInfoAfterWithMemory = joinNonEmptySections([worldInfo.worldInfoAfter, memoryBlock, tetheredBlock]);
         const systemPromptText = buildSystemPrompt({
             systemPrompt: resolved.systemPrompt,
             worldInfoBefore: worldInfo.worldInfoBefore,
@@ -656,9 +654,7 @@ async function generateReply(conversationId, conversation, context, settings) {
             scenarioText: '',
             worldInfoAfter: worldInfoAfterWithMemory,
         });
-        const fullSystemPromptText = [systemPromptText, resolved.postHistory, TEXTING_MODE_INSTRUCTIONS]
-            .filter(section => typeof section === 'string' && section.trim().length > 0)
-            .join('\n\n');
+        const fullSystemPromptText = joinNonEmptySections([systemPromptText, resolved.postHistory, TEXTING_MODE_INSTRUCTIONS]);
 
         const userName = context.name1 || 'User';
         // Resolves every macro in the fully-assembled prompt — {{user}}, {{char}}, {{time}},
@@ -689,7 +685,7 @@ async function generateReply(conversationId, conversation, context, settings) {
             messages,
         });
 
-        const replyText = typeof result === 'string' ? result : (result?.content ?? '');
+        const replyText = extractResponseText(result);
         const parsed = parseReply(replyText);
         if (parsed.messages.length === 0) {
             throw new Error('The model did not return any usable content.');
