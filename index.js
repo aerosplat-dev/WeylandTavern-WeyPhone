@@ -240,22 +240,33 @@ function renderMessagesScreenNow(context, settings) {
     renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
 }
 
-// Runs (or re-runs) a flavor app's generation entirely read-only against the main roleplay's real
-// context — no mutation of context.chat anywhere in this function or anything it calls. This
-// replaces the prior milestone attempt's push/quiet-generate/pop mechanism, which caused a real
-// incident (a synthetic message got permanently saved to a user's real chat file when
-// SillyTavern's own autosave fired mid-generation, before the pop could run) — see this plan's
-// own "Why this plan exists" section. There is no live-array window to race here at all: this
-// function builds a request from data it reads (character fields, World Info text, a NEW array
+// Shared core of runPhoneAppGeneration/runTwitterGeneration — both run (or re-run) a flavor app's
+// generation entirely read-only against the main roleplay's real context: no mutation of
+// context.chat anywhere in this function or anything it calls (every context.chat access below is
+// a READ). It builds a request from data it reads (character fields, World Info text, a NEW array
 // from convertMainChatToMessages) and sends it via ConnectionManagerRequestService, the same path
-// WeyPhone's own texting Messages app already uses — context.chat itself is never touched.
+// WeyPhone's own texting Messages app already uses.
 //
-// phoneAppGeneratingIds.add()/rerenderPhoneAppScreenIfVisible() MUST stay inside this try block —
-// this project's established stuck-lock bug class (a tracking-Set mutation placed before try)
-// applies here exactly the same way it does to generatingConversationIds/
-// memoryGeneratingConversationIds elsewhere in this file.
-async function runPhoneAppGeneration(appKey) {
-    if (phoneAppGeneratingIds.has(appKey)) return;
+// This read-only design deliberately replaces a prior milestone's push/quiet-generate/pop
+// mechanism, which caused a real incident: a synthetic message got permanently saved to a user's
+// real chat file when SillyTavern's own autosave fired mid-generation, before the pop could run.
+// There is no live-array window to race here at all — context.chat itself is never touched.
+//
+// trackingSet.add()/rerender() MUST stay inside this try block — this project's established
+// stuck-lock bug class (a tracking-Set mutation placed before try, leaking a stuck entry if
+// anything before try throws) applies here exactly the same way it does to
+// generatingConversationIds/memoryGeneratingConversationIds elsewhere in this file.
+//
+// Callers parameterize only what actually differs between the phone-app and Twitter variants:
+//   - trackingSet / trackingKey: the in-flight Set and its key (also reused as the content cache
+//     key passed to setPhoneAppContent).
+//   - rerender(): re-renders the currently-visible screen this generation is for.
+//   - buildPromptText(): returns the user-message/WI-scan prompt string, or null to abort silently
+//     after the caller has already surfaced its own error toast (Twitter's missing-roster case).
+//   - parse(rawText): returns { content, usable } — the parsed payload plus whether it's non-empty.
+//   - errorLabel: console.error label for the catch block.
+async function runFlavorAppGeneration({ trackingSet, trackingKey, rerender, buildPromptText, parse, errorLabel }) {
+    if (trackingSet.has(trackingKey)) return;
     const context = SillyTavern.getContext();
     if (!isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId })) {
         toastr.info('No active roleplay to pull content from right now.', 'WeyPhone');
@@ -263,8 +274,8 @@ async function runPhoneAppGeneration(appKey) {
     }
 
     try {
-        phoneAppGeneratingIds.add(appKey);
-        rerenderPhoneAppScreenIfVisible(appKey);
+        trackingSet.add(trackingKey);
+        rerender();
 
         const settings = getSettings(context.extensionSettings);
         const mainCharacter = context.characters[context.characterId];
@@ -273,8 +284,11 @@ async function runPhoneAppGeneration(appKey) {
             return;
         }
 
+        const promptText = buildPromptText();
+        if (promptText === null) return; // buildPromptText already surfaced its own error toast
+
         const resolved = await resolveCharacterPrompt(context, mainCharacter);
-        const worldInfoAfter = await resolveWorldInfoTetheredForMainChat(context, PHONE_APP_PROMPTS[appKey]);
+        const worldInfoAfter = await resolveWorldInfoTetheredForMainChat(context, promptText);
         const mainHistory = convertMainChatToMessages(context.chat);
 
         const systemPromptText = buildSystemPrompt({
@@ -289,16 +303,15 @@ async function runPhoneAppGeneration(appKey) {
         const messages = buildMessages({
             systemPromptText,
             history: mainHistory,
-            userMessage: PHONE_APP_PROMPTS[appKey],
+            userMessage: promptText,
         });
 
         // Same real-macro resolution as generateReply's system prompt and generateMemory's
         // opening message — resolves {{user}}, {{getvar::...}}, etc. in both the system prompt
-        // (which may carry macros via resolved.systemPrompt/personalityText) and the final
-        // user message (PHONE_APP_PROMPTS[appKey], which embeds real {{user}}/{{getvar::MCY-2}}
-        // tokens in its roster content). Guarded against double-substituting the same string
-        // twice in the (not normally reachable) case where buildMessages produced only one
-        // message total.
+        // (which may carry macros via resolved.systemPrompt/personalityText) and the final user
+        // message (promptText, which can embed real {{user}}/{{getvar::MCY-2}} tokens in its roster
+        // content). Guarded against double-substituting the same string in the (not normally
+        // reachable) case where buildMessages produced only one message total.
         const userName = context.name1 || 'User';
         messages[0].content = applyMacroSubstitution({
             substituteParams: context.substituteParams,
@@ -306,8 +319,8 @@ async function runPhoneAppGeneration(appKey) {
             userName,
             charName: mainCharacter.name,
         });
-        if (messages.length > 1) {
-            const lastMessage = messages[messages.length - 1];
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage !== messages[0]) {
             lastMessage.content = applyMacroSubstitution({
                 substituteParams: context.substituteParams,
                 content: lastMessage.content,
@@ -325,25 +338,39 @@ async function runPhoneAppGeneration(appKey) {
         });
 
         const rawText = typeof result === 'string' ? result : (result?.content ?? '');
-        const parsed = parsePhoneAppOutput(rawText);
-        if (parsed.sections.length === 0) {
+        const { content, usable } = parse(rawText);
+        if (!usable) {
             toastr.warning('The model did not return usable content this time.', 'WeyPhone');
             return;
         }
 
-        setPhoneAppContent(settings, context.chatId, appKey, {
-            content: parsed,
+        setPhoneAppContent(settings, context.chatId, trackingKey, {
+            content,
             generatedAt: Date.now(),
             chatMessageCountAtGeneration: context.chat.length,
         });
         context.saveSettingsDebounced();
     } catch (error) {
-        console.error(`[${MODULE_NAME}] Phone app generation failed:`, error);
+        console.error(`[${MODULE_NAME}] ${errorLabel}:`, error);
         toastr.error(error.message, 'WeyPhone');
     } finally {
-        phoneAppGeneratingIds.delete(appKey);
-        rerenderPhoneAppScreenIfVisible(appKey);
+        trackingSet.delete(trackingKey);
+        rerender();
     }
+}
+
+function runPhoneAppGeneration(appKey) {
+    return runFlavorAppGeneration({
+        trackingSet: phoneAppGeneratingIds,
+        trackingKey: appKey,
+        rerender: () => rerenderPhoneAppScreenIfVisible(appKey),
+        buildPromptText: () => PHONE_APP_PROMPTS[appKey],
+        parse: (rawText) => {
+            const parsed = parsePhoneAppOutput(rawText);
+            return { content: parsed, usable: parsed.sections.length > 0 };
+        },
+        errorLabel: 'Phone app generation failed',
+    });
 }
 
 // Re-renders the currently-visible phone-app screen if the user is actually looking at the app
@@ -375,110 +402,36 @@ const twitterGeneratingKeys = new Set();
 
 /**
  * Twitter's equivalent of runPhoneAppGeneration, generalized for its two modes (main feed, or one
- * character's profile). Same read-only mechanism, same never-mutates-context.chat guarantee —
- * this function's only new piece versus runPhoneAppGeneration is building the prompt dynamically
- * via buildTwitterPrompt instead of a static PHONE_APP_PROMPTS[appKey] lookup, and using a
- * composite cache key. Every context.chat access below is a READ ONLY — verify this explicitly in
- * review, matching the standing invariant.
+ * character's profile). Shares runFlavorAppGeneration's read-only mechanism and never-mutates-
+ * context.chat guarantee — the only Twitter-specific pieces are building the prompt dynamically via
+ * buildTwitterPrompt (instead of a static PHONE_APP_PROMPTS[appKey] lookup), parsing with
+ * parseTwitterPosts, and using a composite cache key.
  * @param {'feed' | 'profile'} mode
  * @param {string} [characterName] required when mode === 'profile'
  */
-async function runTwitterGeneration(mode, characterName) {
+function runTwitterGeneration(mode, characterName) {
     const cacheKey = twitterCacheKey(mode, characterName);
-    if (twitterGeneratingKeys.has(cacheKey)) return;
-    const context = SillyTavern.getContext();
-    if (!isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId })) {
-        toastr.info('No active roleplay to pull content from right now.', 'WeyPhone');
-        return;
-    }
-
-    try {
-        twitterGeneratingKeys.add(cacheKey);
-        rerenderTwitterScreenIfVisible(mode, characterName);
-
-        const settings = getSettings(context.extensionSettings);
-        const mainCharacter = context.characters[context.characterId];
-        if (!mainCharacter) {
-            toastr.info('No active roleplay to pull content from right now.', 'WeyPhone');
-            return;
-        }
-
-        let promptText;
-        if (mode === 'profile') {
-            const rosterEntry = WEYLAND_ROSTER.find(c => c.name === characterName);
-            if (!rosterEntry) {
-                toastr.error(`No roster entry found for "${characterName}".`, 'WeyPhone');
-                return;
+    return runFlavorAppGeneration({
+        trackingSet: twitterGeneratingKeys,
+        trackingKey: cacheKey,
+        rerender: () => rerenderTwitterScreenIfVisible(mode, characterName),
+        buildPromptText: () => {
+            if (mode === 'profile') {
+                const rosterEntry = WEYLAND_ROSTER.find(c => c.name === characterName);
+                if (!rosterEntry) {
+                    toastr.error(`No roster entry found for "${characterName}".`, 'WeyPhone');
+                    return null;
+                }
+                return buildTwitterPrompt({ mode: 'profile', character: rosterEntry });
             }
-            promptText = buildTwitterPrompt({ mode: 'profile', character: rosterEntry });
-        } else {
-            promptText = buildTwitterPrompt({ mode: 'feed' });
-        }
-
-        const resolved = await resolveCharacterPrompt(context, mainCharacter);
-        const worldInfoAfter = await resolveWorldInfoTetheredForMainChat(context, promptText);
-        const mainHistory = convertMainChatToMessages(context.chat);
-
-        const systemPromptText = buildSystemPrompt({
-            systemPrompt: resolved.systemPrompt,
-            worldInfoBefore: '',
-            descriptionText: resolved.descriptionText,
-            personalityText: resolved.personalityText,
-            scenarioText: '',
-            worldInfoAfter,
-        });
-
-        const messages = buildMessages({
-            systemPromptText,
-            history: mainHistory,
-            userMessage: promptText,
-        });
-
-        const userName = context.name1 || 'User';
-        messages[0].content = applyMacroSubstitution({
-            substituteParams: context.substituteParams,
-            content: messages[0].content,
-            userName,
-            charName: mainCharacter.name,
-        });
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage !== messages[0]) {
-            lastMessage.content = applyMacroSubstitution({
-                substituteParams: context.substituteParams,
-                content: lastMessage.content,
-                userName,
-                charName: mainCharacter.name,
-            });
-        }
-
-        const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
-        const profileId = resolveProfileId(settings, activeProfileId);
-        const result = await sendMessage({
-            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_PHONE_APP_MAX_TOKENS),
-            profileId,
-            messages,
-        });
-
-        const rawText = typeof result === 'string' ? result : (result?.content ?? '');
-        const parsed = parseTwitterPosts(rawText, { roster: WEYLAND_ROSTER, psaAccounts: PSA_ACCOUNTS });
-        if (parsed.posts.length === 0) {
-            toastr.warning('The model did not return usable content this time.', 'WeyPhone');
-            return;
-        }
-
-        setPhoneAppContent(settings, context.chatId, cacheKey, {
-            content: parsed,
-            generatedAt: Date.now(),
-            chatMessageCountAtGeneration: context.chat.length,
-        });
-        context.saveSettingsDebounced();
-    } catch (error) {
-        console.error(`[${MODULE_NAME}] Twitter generation failed:`, error);
-        toastr.error(error.message, 'WeyPhone');
-    } finally {
-        twitterGeneratingKeys.delete(cacheKey);
-        rerenderTwitterScreenIfVisible(mode, characterName);
-    }
+            return buildTwitterPrompt({ mode: 'feed' });
+        },
+        parse: (rawText) => {
+            const parsed = parseTwitterPosts(rawText, { roster: WEYLAND_ROSTER, psaAccounts: PSA_ACCOUNTS });
+            return { content: parsed, usable: parsed.posts.length > 0 };
+        },
+        errorLabel: 'Twitter generation failed',
+    });
 }
 
 function rerenderTwitterScreenIfVisible(mode, characterName) {
