@@ -61,10 +61,27 @@ test('discord references @luckypaww and the expected channels', () => {
     assert.match(PHONE_APP_PROMPTS.discord, /#weyland-sports/);
 });
 
-test('yikyak includes the YIK YAK section and contrasts anonymity with Discord', () => {
+test('yikyak includes the YIK YAK section and contrasts anonymity with a semi-public, real-name channel', () => {
+    // Deliberately does NOT reference another app by name (prompts aren't aware of each other or
+    // of other social apps) — the contrast is phrased by subject matter instead.
     assert.match(PHONE_APP_PROMPTS.yikyak, /## YIK YAK/);
     assert.match(PHONE_APP_PROMPTS.yikyak, /anonymous/i);
-    assert.match(PHONE_APP_PROMPTS.yikyak, /Discord/);
+    assert.match(PHONE_APP_PROMPTS.yikyak, /semi-public channel where every message is tied to a real, named identity/);
+    assert.doesNotMatch(PHONE_APP_PROMPTS.yikyak, /Discord|Twitter|Chronicle/);
+});
+
+// Regression coverage for cross-app subject-matter bleed: each of the three apps now discourages
+// the OTHER two apps' dominant subject matter, described by content type rather than app name
+// (prompts aren't aware of each other or of other social apps, so no app is ever named).
+test('discord discourages anonymous-confession subject matter and standalone-broadcast subject matter', () => {
+    assert.match(PHONE_APP_PROMPTS.discord, /avoid anonymous-sounding confessions/i);
+    assert.match(PHONE_APP_PROMPTS.discord, /avoid single standalone personal-life announcements/i);
+    assert.doesNotMatch(PHONE_APP_PROMPTS.discord, /Yik Yak|Twitter|Chronicle/);
+});
+
+test('yikyak discourages organized-channel-conversation subject matter and personal-broadcast subject matter', () => {
+    assert.match(PHONE_APP_PROMPTS.yikyak, /avoid writing this like an organized back-and-forth conversation/i);
+    assert.match(PHONE_APP_PROMPTS.yikyak, /a public personal update\/announcement with an attached\s+name/i);
 });
 
 test('discord and yikyak both embed the real WEYLAND ROSTER names/handles', () => {
@@ -81,8 +98,8 @@ test('discord still contains the pre-existing static @luckypaww mention, unremov
 });
 
 test('yikyak explicitly notes anonymous posts can still be recognizably consistent with a roster personality', () => {
-    assert.match(PHONE_APP_PROMPTS.yikyak, /recognizably\s+consistent with one of the roster personalities above/);
-    assert.match(PHONE_APP_PROMPTS.yikyak, /guess who posted this/);
+    assert.match(PHONE_APP_PROMPTS.yikyak, /recognizably\s+consistent\s+with\s+one\s+of\s+the\s+roster\s+personalities\s+above/);
+    assert.match(PHONE_APP_PROMPTS.yikyak, /guess\s+who\s+posted\s+this/);
 });
 
 test('chronicle embeds several WEYLAND_LOCATIONS keywords but does NOT include roster names', () => {

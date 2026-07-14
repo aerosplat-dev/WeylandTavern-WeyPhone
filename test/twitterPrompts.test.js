@@ -57,3 +57,17 @@ test('buildTwitterPrompt does not contain the old contradicting retweet-format i
     assert.doesNotMatch(feedPrompt, /no special formatting needed/i);
     assert.doesNotMatch(profilePrompt, /no special formatting needed/i);
 });
+
+// Regression coverage for cross-app subject-matter bleed: each of Discord/Yik Yak/Twitter now
+// discourages the OTHER two's dominant subject matter, described by content type rather than app
+// name (prompts aren't aware of each other or of other social apps, so no app is ever named here).
+test('buildTwitterPrompt feed and profile modes discourage live-chat-thread and anonymous-confession subject matter, without naming another app', () => {
+    const feedPrompt = buildTwitterPrompt({ mode: 'feed' });
+    const character = { name: 'Blake', handle: '@codewolf', bio: '- test bio' };
+    const profilePrompt = buildTwitterPrompt({ mode: 'profile', character });
+    for (const prompt of [feedPrompt, profilePrompt]) {
+        assert.match(prompt, /avoid writing these like a live group-chat reply thread/i);
+        assert.match(prompt, /anonymous-sounding confession or explicit rant/i);
+        assert.doesNotMatch(prompt, /Yik Yak|Discord|Chronicle/);
+    }
+});
