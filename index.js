@@ -22,7 +22,7 @@ import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
-let currentView = 'home'; // 'home' | 'contacts' | 'conversation' | 'memory'
+let currentView = 'home'; // 'home' | 'contacts' | 'conversation' | 'memory' | 'messages' | 'threads'
 let currentConversationId = null;
 let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
 let currentTwitterProfileCharacter = null;
@@ -518,6 +518,16 @@ function refreshVisibleScreen() {
         const context = SillyTavern.getContext();
         const settings = getSettings(context.extensionSettings);
         renderMessagesScreenNow(context, settings);
+        return;
+    }
+    if (currentView === 'threads') {
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        const screenBody = document.getElementById('wp-screen-body');
+        if (!screenBody) return;
+        const summaries = withTypingState(getThreadsFor(settings, currentThreadsFilter ?? ''), generatingConversationIds);
+        const portraitMap = buildPortraitMap(context.characters, [currentThreadsFilter], context.getThumbnailUrl);
+        renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
         return;
     }
     if (currentView === 'conversation' && currentConversationId) {
