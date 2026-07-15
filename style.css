@@ -371,14 +371,18 @@
 }
 
 .wp-housing-iframe {
-    /* #wp-screen-body is a column flex container — as a flex item, the iframe's default
-       flex-basis (auto) falls back to its own intrinsic size (a replaced element's UA-default
-       300x150px), NOT `height: 100%` below, since percentage heights don't resolve against a
-       flex item's own content box the way block-level children do. Without flex: 1 the iframe
-       renders at that default 150px tall regardless of the height rule, clipping almost all of
-       the map — this is what actually looked like "wrong colors": only the top ~150px sliver
-       (just the legend row) was visible, with the panel's own dark background showing through
-       the rest of the screen body below it.  */
+    /* The iframe always fills 100% of whatever the panel currently gives it — responsive to the
+       panel's size, not an independently fixed/resizable box (tried, reverted — the map's own
+       internal responsive layout needs to see its REAL rendered width, and a fixed iframe size
+       decouples that from the panel entirely). The "start at 800x600 on desktop" default is
+       achieved by sizing the PANEL itself when Housing is entered (see index.js's
+       showScreen('housing')), which this iframe then just fills — so the panel's own existing
+       resize handles are the only resize mechanism, and the iframe always tracks along with them.
+       flex: 1 (not just height: 100% alone) is load-bearing here — #wp-screen-body is a column
+       flex container, and a flex item's default flex-basis falls back to its own intrinsic size
+       (a replaced element's UA-default 300x150px) rather than resolving height: 100% against the
+       flex container, so without flex: 1 the iframe renders at that ~150px-tall default regardless
+       of the height rule below. */
     flex: 1;
     min-height: 0;
     width: 100%;

@@ -1250,6 +1250,20 @@ function showScreen(view) {
     if (view === 'housing') {
         title.textContent = 'Housing Directory';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
+        // Desktop only: give the panel a default starting size that lets the map's iframe (which
+        // just fills 100% of whatever the panel gives it — see style.css) render at a comfortable
+        // 800x600 (4:3) rather than the panel's own small default. Sets the SAME inline
+        // width/height styles initPanelResize's own drag handles write, so the panel stays fully
+        // resizable afterward through that one existing mechanism — no separate resize system for
+        // the iframe itself. Skipped on mobile, where #wp-panel is already a fixed full-screen
+        // sheet via CSS (matching the same 600px breakpoint as that CSS) — an inline width/height
+        // here would just fight that override, since inline styles always win over stylesheet
+        // rules regardless of media query.
+        if (window.innerWidth > 600) {
+            const headerHeight = document.getElementById('wp-panel-header').getBoundingClientRect().height;
+            panel.style.width = `${Math.min(800, window.innerWidth * 0.9)}px`;
+            panel.style.height = `${Math.min(600 + headerHeight, window.innerHeight * 0.9)}px`;
+        }
         renderHousingScreen(screenBody, { registrarEnabled: settings.housingRegistrarEnabled });
         const registrarCheckbox = document.getElementById('wp-registrar-checkbox');
         if (registrarCheckbox) setRegistrarToggleState(registrarCheckbox, settings.housingRegistrarEnabled);
