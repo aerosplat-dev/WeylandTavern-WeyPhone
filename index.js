@@ -4,7 +4,7 @@ import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonality
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
-import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen } from './lib/panel.js';
+import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen, setRegistrarToggleState } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
@@ -1250,7 +1250,9 @@ function showScreen(view) {
     if (view === 'housing') {
         title.textContent = 'Weyland Housing';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
-        renderHousingScreen(screenBody);
+        renderHousingScreen(screenBody, { registrarEnabled: settings.housingRegistrarEnabled });
+        const registrarCheckbox = document.getElementById('wp-registrar-checkbox');
+        if (registrarCheckbox) setRegistrarToggleState(registrarCheckbox, settings.housingRegistrarEnabled);
         return;
     }
 
@@ -1677,6 +1679,20 @@ function initPanel() {
         const settings = getSettings(context.extensionSettings);
         setTetheredSettings(settings, currentConversationId, { tethered: event.target.checked });
         context.saveSettingsDebounced();
+    });
+
+    // Rebuilds the Housing iframe's own src with/without ?registrar=true — the map page gates its
+    // whole community-character feature behind that query param at load time (see
+    // renderHousingScreen's docstring), so there's no in-page API to flip it after the fact; the
+    // only way to change it is to reload the iframe with a different src.
+    document.getElementById('wp-registrar-checkbox').addEventListener('change', (event) => {
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        settings.housingRegistrarEnabled = event.target.checked;
+        context.saveSettingsDebounced();
+        if (currentView === 'housing') {
+            renderHousingScreen(document.getElementById('wp-screen-body'), { registrarEnabled: settings.housingRegistrarEnabled });
+        }
     });
 
     updateTetheredToggleAvailability();

@@ -224,11 +224,13 @@
     font-size: 12px;
 }
 
-#wp-mode-toggle {
+#wp-mode-toggle,
+#wp-registrar-toggle-label {
     display: none;
 }
 
-#wp-panel[data-view="conversation"] #wp-mode-toggle {
+#wp-panel[data-view="conversation"] #wp-mode-toggle,
+#wp-panel[data-view="housing"] #wp-registrar-toggle-label {
     display: inline-flex;
     align-items: center;
     gap: 4px;
