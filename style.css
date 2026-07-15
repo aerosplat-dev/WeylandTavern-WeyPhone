@@ -185,7 +185,8 @@
 #wp-panel[data-view="twitter-feed"] #wp-home-button,
 #wp-panel[data-view="twitter-following"] #wp-home-button,
 #wp-panel[data-view="twitter-profile"] #wp-home-button,
-#wp-panel[data-view="threads"] #wp-home-button {
+#wp-panel[data-view="threads"] #wp-home-button,
+#wp-panel[data-view="housing"] #wp-home-button {
     display: flex;
 }
 
@@ -357,6 +358,21 @@
     overflow: hidden;
     padding: 0;
     gap: 0;
+}
+
+/* Housing is a full-bleed iframe (its own standalone page, own scrolling) — no panel padding
+   around it, same treatment as the conversation view above. */
+#wp-panel[data-view="housing"] #wp-screen-body {
+    overflow: hidden;
+    padding: 0;
+    gap: 0;
+}
+
+.wp-housing-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
 }
 
 .wp-empty-state {

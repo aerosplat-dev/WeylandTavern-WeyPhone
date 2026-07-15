@@ -4,7 +4,7 @@ import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonality
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
-import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen } from './lib/panel.js';
+import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
@@ -22,9 +22,9 @@ import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 import { ravs } from '../../quick-reply-ext/src/rav.js';
 import { charPer } from '../../quick-reply-ext/src/charper.js';
 
-// One of the 10 data-view values showScreen() sets on #wp-panel:
+// One of the 11 data-view values showScreen() sets on #wp-panel:
 // 'home' | 'contacts' | 'conversation' | 'memory' | 'messages' | 'threads' | 'phone-app' |
-// 'twitter-feed' | 'twitter-following' | 'twitter-profile'
+// 'twitter-feed' | 'twitter-following' | 'twitter-profile' | 'housing'
 let currentView = 'home';
 let currentConversationId = null;
 let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
@@ -1019,6 +1019,8 @@ function handleScreenBodyClick(event) {
             showScreen('messages');
         } else if (appKey === 'twitter') {
             showScreen('twitter-feed');
+        } else if (appKey === 'housing') {
+            showScreen('housing');
         } else {
             currentPhoneApp = appKey;
             showScreen('phone-app');
@@ -1242,6 +1244,13 @@ function showScreen(view) {
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         const flavorAppsEnabled = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
         renderAppGridScreen(screenBody, { flavorAppsEnabled });
+        return;
+    }
+
+    if (view === 'housing') {
+        title.textContent = 'Weyland Housing';
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
+        renderHousingScreen(screenBody);
         return;
     }
 
