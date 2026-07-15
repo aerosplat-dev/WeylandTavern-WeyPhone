@@ -2,9 +2,9 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, findOrCreateDedicatedAppConversation, getThreadsFor } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor } from './lib/storage.js';
 import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
-import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, setModeToggleVisible } from './lib/panel.js';
+import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
@@ -51,27 +51,14 @@ const DEFAULT_MAX_TOKENS = 1024;
 const DEFAULT_MEMORY_MAX_TOKENS = 256;
 
 /**
- * Resolves the character record generateReply/generateMemory need for a WeyPhone conversation.
- * For every normal conversation this is a real installed SillyTavern character (a plain
- * context.characters lookup by name). Aethel is a deliberate exception: she has no standalone
- * character card at all — her real personality/lore lives entirely as quick-reply-ext's own
- * charper.js data (charPer.get('Aethel')), the same Weybot-sandbox mechanism the platform already
- * uses to let Weybot roleplay as her without a real card. resolveCharacterPrompt reads
- * character.name (to look up prompt/personality content in charPer/ravs) and character.description
- * (defaulted to '' if absent, which is correct for Aethel — she has no real card to draw a
- * description from anyway) — it never needs any other field, and avatar resolution goes through
- * buildPortraitMap independently (already resilient to no local character match — see
- * lib/portraits.js), so a synthetic stub is safe everywhere a resolved character actually gets used
- * downstream of this function.
+ * Resolves the character record generateReply/generateMemory need for a WeyPhone conversation —
+ * a plain context.characters lookup by name.
  * @param {{characters: Array<{name: string}>}} context
  * @param {string} charName
  * @returns {{name: string, avatar: string|null} | undefined}
  */
 function resolveConversationCharacter(context, charName) {
-    const found = context.characters.find(c => c.name === charName);
-    if (found) return found;
-    if (charName === 'Aethel' && charPer.has('Aethel')) return { name: 'Aethel', avatar: null };
-    return undefined;
+    return context.characters.find(c => c.name === charName);
 }
 
 function log(...args) {
@@ -717,8 +704,8 @@ async function generateReply(conversationId, conversation, context, settings) {
         // A Connection Profile's own `model` field is a snapshot from whenever it was last saved —
         // ConnectionManagerRequestService.sendRequest always sends that saved value, not whatever
         // model is actually live/selected in SillyTavern's main chat completion settings right now
-        // (context.getChatCompletionModel()). Messages/Aethel are meant to always track the live
-        // main-chat model, so it's passed as an overridePayload — sendRequest spreads this over the
+        // (context.getChatCompletionModel()). Messages conversations are meant to always track the
+        // live main-chat model, so it's passed as an overridePayload — sendRequest spreads this over the
         // profile's own defaults, letting api-url/auth/preset still come from the pinned profile
         // while the model itself stays live. Falls back to the profile's own (possibly stale) model
         // if the live model can't be resolved for any reason, rather than sending a broken override.
@@ -937,35 +924,15 @@ function handleStartConversation(charName) {
     showScreen('conversation');
 }
 
-function openAethelConversation() {
-    const context = SillyTavern.getContext();
-    // Aethel has no standalone SillyTavern character card at all — she's never findable via
-    // context.characters, by design (see resolveConversationCharacter above). Her real
-    // availability check is whether the platform's own quick-reply-ext charper.js data has her
-    // (the same Weybot-sandbox mechanism that lets Weybot roleplay as her without a real card).
-    if (!charPer.has('Aethel')) {
-        toastr.error('Aethel\'s character data isn\'t available in this SillyTavern instance.', 'WeyPhone');
-        return;
-    }
-    const settings = getSettings(context.extensionSettings);
-    const conversation = findOrCreateDedicatedAppConversation(settings, 'Aethel', 'aethel');
-    context.saveSettingsDebounced();
-    currentConversationId = conversation.id;
-    showScreen('conversation');
-}
-
-// "Start New Thread" — creates a fresh conversation with the SAME character (and, if the current
-// thread happens to be isDedicatedApp-tagged, the same tag — so a new Aethel thread also stays
-// hidden from the general Messages list, matching her existing threads) as the one currently open,
-// WITHOUT touching the existing thread's messages at all (createConversation always makes a
+// "Start New Thread" — creates a fresh conversation with the SAME character as the one currently
+// open, WITHOUT touching the existing thread's messages at all (createConversation always makes a
 // brand-new record; nothing here deletes or modifies the current conversation).
 function handleStartNewThread() {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, currentConversationId);
     if (!conversation) return;
-    const options = conversation.isDedicatedApp ? { isDedicatedApp: conversation.isDedicatedApp } : {};
-    const newConversation = createConversation(settings, conversation.charName, options);
+    const newConversation = createConversation(settings, conversation.charName);
     context.saveSettingsDebounced();
     currentConversationId = newConversation.id;
     showScreen('conversation');
@@ -973,8 +940,7 @@ function handleStartNewThread() {
 
 // "Switch Threads" — navigates to a filtered thread list (via the SAME renderMessagesScreen used
 // by the Messages screen, just fed a differently-filtered summaries array) for whichever character
-// the currently open conversation belongs to. Purely charName-based — works identically for Aethel
-// and every regular character, no isDedicatedApp branching here at all.
+// the currently open conversation belongs to.
 function handleSwitchThreads() {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
@@ -987,11 +953,6 @@ function handleSwitchThreads() {
 function handleDeleteConversation(id) {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
-    // Capture whether the conversation being deleted was itself isDedicatedApp-tagged BEFORE
-    // deleting it — needed below to pick a sensible fallback screen if this was this character's
-    // very last thread, since deleteConversation removes the record this info lives on.
-    const deletedConversation = getConversation(settings, id);
-    const wasDedicatedApp = !!deletedConversation?.isDedicatedApp;
     deleteConversation(settings, id);
     context.saveSettingsDebounced();
     if (currentConversationId === id) {
@@ -999,11 +960,7 @@ function handleDeleteConversation(id) {
     }
     if (currentView === 'threads') {
         const remaining = getThreadsFor(settings, currentThreadsFilter ?? '');
-        if (remaining.length === 0) {
-            showScreen(wasDedicatedApp ? 'home' : 'messages');
-        } else {
-            showScreen('threads');
-        }
+        showScreen(remaining.length === 0 ? 'messages' : 'threads');
         return;
     }
     showScreen('messages');
@@ -1062,8 +1019,6 @@ function handleScreenBodyClick(event) {
             showScreen('messages');
         } else if (appKey === 'twitter') {
             showScreen('twitter-feed');
-        } else if (appKey === 'aethel') {
-            openAethelConversation();
         } else {
             currentPhoneApp = appKey;
             showScreen('phone-app');
@@ -1392,11 +1347,9 @@ function showScreen(view) {
     const isTyping = generatingConversationIds.has(currentConversationId);
     renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState());
     updateRegenerateEnabled(conversation);
-    // Route the tethered checkbox's checked AND disabled state (plus the mode-toggle visibility)
-    // through the shared helper, so entering the conversation view freshly re-verifies the disabled
-    // state against the currently-active main roleplay rather than assuming the last CHAT_CHANGED
-    // left it correct. The helper reads this same conversation's tethered/isDedicatedApp fields, so
-    // it reproduces exactly what the inline code did, plus the .disabled sync.
+    // Route the tethered checkbox's checked AND disabled state through the shared helper, so
+    // entering the conversation view freshly re-verifies the disabled state against the
+    // currently-active main roleplay rather than assuming the last CHAT_CHANGED left it correct.
     updateTetheredToggleAvailability();
 }
 
@@ -1635,18 +1588,14 @@ function updateTetheredToggleAvailability() {
     const context = SillyTavern.getContext();
     const active = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
     let checked = checkbox.checked;
-    let isDedicatedApp = false;
     if (currentConversationId) {
         const settings = getSettings(context.extensionSettings);
         const conversation = getConversation(settings, currentConversationId);
         if (conversation) {
             checked = conversation.tethered;
-            isDedicatedApp = !!conversation.isDedicatedApp;
         }
     }
     setTetheredToggleState(checkbox, { checked, disabled: !active });
-    const modeToggleLabel = document.getElementById('wp-mode-toggle');
-    if (modeToggleLabel) setModeToggleVisible(modeToggleLabel, !isDedicatedApp);
 }
 
 // Re-renders the Home app grid (recomputing which flavor tiles should be enabled/disabled) if

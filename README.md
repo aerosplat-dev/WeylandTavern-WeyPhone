@@ -31,7 +31,6 @@ pop full-screen on mobile.
 - **Twitter** — Everyone's already posting. Follow your favorites, or just watch the timeline burn.
 - **Discord** — Every server has that one channel. Drop into the chaos, channel by channel.
 - **Yik Yak** — Hyperlocal and completely unfiltered. Nobody knows who's posting. Everybody has a guess.
-- **Aethel: The Game** — Meet Aethel, living in her own dedicated app — right where she belongs.
 
 ## Features
 
