@@ -1248,7 +1248,7 @@ function showScreen(view) {
     }
 
     if (view === 'housing') {
-        title.textContent = 'Weyland Housing';
+        title.textContent = 'Housing Directory';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         renderHousingScreen(screenBody, { registrarEnabled: settings.housingRegistrarEnabled });
         const registrarCheckbox = document.getElementById('wp-registrar-checkbox');
