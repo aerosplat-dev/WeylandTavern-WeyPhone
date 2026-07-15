@@ -354,6 +354,13 @@
     gap: 8px;
 }
 
+/* Home is permanently locked to a fixed panel size (see index.js's showScreen/HOME_PANEL_SIZE)
+   that's sized to fit its 2x3 app grid exactly — no scrolling should ever be needed, but this
+   makes that explicit/certain rather than incidental. */
+#wp-panel[data-view="home"] #wp-screen-body {
+    overflow: hidden;
+}
+
 /* Conversation view delegates its own scrolling to #wp-messages (below) instead of scrolling
    the whole screen body, so the input row can stay pinned at the bottom. */
 #wp-panel[data-view="conversation"] #wp-screen-body {

@@ -30,6 +30,18 @@ let currentConversationId = null;
 let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
 let currentTwitterProfileCharacter = null;
 let currentThreadsFilter = null; // charName string — set when entering the 'threads' view
+
+// Desktop-only per-view panel sizes the user has manually resized to, via the SAME drag handles
+// initPanelResize always used — recorded on drag-end (see endResize there), applied on entering
+// that view again (see showScreen below), so resizing while on one app never bleeds into another's
+// size. Session-only (an in-memory Map, like currentView/currentConversationId above) — resets on
+// page reload, same as every other piece of UI state tracked this way in this file.
+//
+// 'home' deliberately never participates: it's permanently locked to HOME_PANEL_SIZE below (see
+// showScreen), not remembered or resizable-and-kept the way every other view is.
+const viewPanelSizes = new Map();
+const HOME_PANEL_SIZE = { width: 360, height: 466 };
+
 const PHONE_APP_LABELS = { chronicle: 'The Chronicle', discord: 'Discord', yikyak: 'Yik Yak' };
 const phoneAppGeneratingIds = new Set(); // tracks which app keys currently have a generation in flight
 const DEFAULT_PHONE_APP_MAX_TOKENS = 1024;
@@ -1239,6 +1251,37 @@ function showScreen(view) {
     const screenBody = document.getElementById('wp-screen-body');
     panel.dataset.view = view;
 
+    // Desktop-only panel sizing — skipped on mobile, where #wp-panel is already a fixed
+    // full-screen sheet via CSS (matching the same 600px breakpoint as that CSS); an inline
+    // width/height here would just fight that override, since inline styles always win over
+    // stylesheet rules regardless of media query.
+    //
+    // 'home' is permanently locked to HOME_PANEL_SIZE, every single time it's entered — no memory,
+    // not resizable-and-kept the way every other view is (initPanelResize's own drag handles still
+    // let you drag it in the moment, it just always reverts on the next visit).
+    //
+    // Every other view applies whatever size was last recorded for IT SPECIFICALLY in
+    // viewPanelSizes (see initPanelResize's endResize) — so resizing while on one app never bleeds
+    // into another's size. 'housing' additionally gets a one-time default (800x600, so its
+    // iframe — which just fills 100% of whatever the panel gives it, see style.css — renders at a
+    // comfortable 4:3 the very first time it's opened in a session) when it has no recorded size
+    // yet; every other view with no recorded size yet is simply left at whatever the panel
+    // currently is.
+    if (window.innerWidth > 600) {
+        if (view === 'home') {
+            panel.style.width = `${HOME_PANEL_SIZE.width}px`;
+            panel.style.height = `${HOME_PANEL_SIZE.height}px`;
+        } else if (viewPanelSizes.has(view)) {
+            const size = viewPanelSizes.get(view);
+            panel.style.width = `${size.width}px`;
+            panel.style.height = `${size.height}px`;
+        } else if (view === 'housing') {
+            const headerHeight = document.getElementById('wp-panel-header').getBoundingClientRect().height;
+            panel.style.width = `${Math.min(800, window.innerWidth * 0.9)}px`;
+            panel.style.height = `${Math.min(600 + headerHeight, window.innerHeight * 0.9)}px`;
+        }
+    }
+
     if (view === 'home') {
         title.textContent = 'Home';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
@@ -1250,20 +1293,6 @@ function showScreen(view) {
     if (view === 'housing') {
         title.textContent = 'Housing Directory';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
-        // Desktop only: give the panel a default starting size that lets the map's iframe (which
-        // just fills 100% of whatever the panel gives it — see style.css) render at a comfortable
-        // 800x600 (4:3) rather than the panel's own small default. Sets the SAME inline
-        // width/height styles initPanelResize's own drag handles write, so the panel stays fully
-        // resizable afterward through that one existing mechanism — no separate resize system for
-        // the iframe itself. Skipped on mobile, where #wp-panel is already a fixed full-screen
-        // sheet via CSS (matching the same 600px breakpoint as that CSS) — an inline width/height
-        // here would just fight that override, since inline styles always win over stylesheet
-        // rules regardless of media query.
-        if (window.innerWidth > 600) {
-            const headerHeight = document.getElementById('wp-panel-header').getBoundingClientRect().height;
-            panel.style.width = `${Math.min(800, window.innerWidth * 0.9)}px`;
-            panel.style.height = `${Math.min(600 + headerHeight, window.innerHeight * 0.9)}px`;
-        }
         renderHousingScreen(screenBody, { registrarEnabled: settings.housingRegistrarEnabled });
         const registrarCheckbox = document.getElementById('wp-registrar-checkbox');
         if (registrarCheckbox) setRegistrarToggleState(registrarCheckbox, settings.housingRegistrarEnabled);
@@ -1597,7 +1626,18 @@ function initPanelResize(panel) {
             panel.style.height = `${newHeight}px`;
         });
 
-        const endResize = () => { if (resizingDir === dir) resizingDir = null; };
+        const endResize = () => {
+            if (resizingDir !== dir) return;
+            resizingDir = null;
+            // 'home' is permanently locked (see showScreen) — recording a size for it here would
+            // just be dead data, since showScreen always overwrites it back to HOME_PANEL_SIZE the
+            // next time 'home' is entered anyway. Every other view remembers whatever it was just
+            // resized to, independent of every other view's own remembered size.
+            if (currentView !== 'home') {
+                const rect = panel.getBoundingClientRect();
+                viewPanelSizes.set(currentView, { width: rect.width, height: rect.height });
+            }
+        };
         handle.addEventListener('pointerup', endResize);
         handle.addEventListener('pointercancel', endResize);
     });
