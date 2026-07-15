@@ -369,6 +369,16 @@
 }
 
 .wp-housing-iframe {
+    /* #wp-screen-body is a column flex container — as a flex item, the iframe's default
+       flex-basis (auto) falls back to its own intrinsic size (a replaced element's UA-default
+       300x150px), NOT `height: 100%` below, since percentage heights don't resolve against a
+       flex item's own content box the way block-level children do. Without flex: 1 the iframe
+       renders at that default 150px tall regardless of the height rule, clipping almost all of
+       the map — this is what actually looked like "wrong colors": only the top ~150px sliver
+       (just the legend row) was visible, with the panel's own dark background showing through
+       the rest of the screen body below it.  */
+    flex: 1;
+    min-height: 0;
     width: 100%;
     height: 100%;
     border: none;
