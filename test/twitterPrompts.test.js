@@ -123,7 +123,7 @@ test('buildTwitterPrompt feed and profile modes discourage live-chat-thread and 
     const character = { name: 'Blake', handle: '@codewolf', bio: '- test bio' };
     const profilePrompt = buildTwitterPrompt({ mode: 'profile', character });
     for (const prompt of [feedPrompt, profilePrompt]) {
-        assert.match(prompt, /avoid writing these like a live group-chat reply thread/i);
+        assert.match(prompt, /avoid\s+writing\s+these\s+like\s+a\s+live\s+group-chat\s+reply\s+thread/i);
         assert.match(prompt, /anonymous-sounding confession or explicit rant/i);
         assert.doesNotMatch(prompt, /Yik Yak|Discord|Chronicle/);
     }
