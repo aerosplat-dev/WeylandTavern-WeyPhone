@@ -45,6 +45,15 @@ const HOME_PANEL_SIZE = { width: 360, height: 466 };
 const PHONE_APP_LABELS = { chronicle: 'The Chronicle', discord: 'Discord', yikyak: 'Yik Yak' };
 const phoneAppGeneratingIds = new Set(); // tracks which app keys currently have a generation in flight
 const DEFAULT_PHONE_APP_MAX_TOKENS = 1024;
+// Unlike a WeyPhone conversation's own tetheredHistoryCap (per-conversation, user-configurable,
+// defaults to uncapped), flavor-app generation had NO cap at all on how much of the main
+// roleplay's real history it includes as literal message history — every refresh sent the ENTIRE
+// chat, unbounded, regardless of how long the roleplay had grown. Confirmed live: with a real
+// 113-message main chat, this alone pushed a single generation to ~80,000 tokens and past
+// HelixMind's own ceiling, failing every flavor-app refresh outright ("Input exceeds maximum token
+// limit"). Capped to the most recent messages via the same resolveMainHistorySlice machinery
+// Messages already uses, rather than truly uncapped.
+const FLAVOR_APP_HISTORY_CAP = 50;
 let editingMessageIndex = -1;
 let editingMemoryId = null;
 let selectMode = false;
@@ -310,7 +319,16 @@ async function runFlavorAppGeneration({ trackingSet, trackingKey, rerender, buil
 
         const resolved = await resolveCharacterPrompt(context, mainCharacter);
         const worldInfoAfter = await resolveWorldInfoTetheredForMainChat(context, promptText);
-        const mainHistory = convertMainChatToMessages(context.chat);
+        // Capped to the most recent messages (see FLAVOR_APP_HISTORY_CAP above) — the WI scan
+        // itself (resolveWorldInfoTetheredForMainChat, just above) still sees the FULL history,
+        // since that's self-limited by World Info's own entry budget already; only the raw
+        // message-history payload sent as literal conversation turns needs bounding here.
+        const historySlice = resolveMainHistorySlice({
+            chat: context.chat,
+            lastLtmMessageId: -1,
+            historyCap: FLAVOR_APP_HISTORY_CAP,
+        });
+        const mainHistory = convertMainChatToMessages(historySlice);
 
         const systemPromptText = buildSystemPrompt({
             systemPrompt: resolved.systemPrompt,
@@ -1223,21 +1241,6 @@ function handleScreenBodyChange(event) {
     context.saveSettingsDebounced();
 }
 
-// Shared staleness-check-and-conditionally-regenerate for the phone-app / twitter-feed /
-// twitter-profile views: if this app's cached content was generated against a different main-chat
-// message count than the live one, kick off a fresh generation (unless one is already in flight)
-// rather than requiring the user to notice and tap refresh. A screen with no cached entry at all
-// yet is deliberately NOT auto-generated here — every one of these screens (including
-// twitter-profile, reached via a Following-list item or a feed post's avatar/name) requires an
-// explicit first tap of Refresh, same as Chronicle/Discord/Yik Yak/the Twitter feed.
-function regenerateFlavorAppIfStale(context, settings, { cacheKey, trackingSet, regenerate }) {
-    const entry = getPhoneAppContent(settings, context.chatId, cacheKey);
-    const isStale = entry && entry.chatMessageCountAtGeneration !== context.chat.length;
-    if (isStale && !trackingSet.has(cacheKey)) {
-        regenerate();
-    }
-}
-
 function showScreen(view) {
     currentView = view;
     // Navigating anywhere (including re-entering the same conversation) exits select mode —
@@ -1321,11 +1324,6 @@ function showScreen(view) {
         title.textContent = PHONE_APP_LABELS[currentPhoneApp];
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         rerenderPhoneAppScreenIfVisible(currentPhoneApp);
-        regenerateFlavorAppIfStale(context, settings, {
-            cacheKey: currentPhoneApp,
-            trackingSet: phoneAppGeneratingIds,
-            regenerate: () => runPhoneAppGeneration(currentPhoneApp),
-        });
         return;
     }
 
@@ -1333,11 +1331,6 @@ function showScreen(view) {
         title.textContent = 'Twitter';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         rerenderTwitterScreenIfVisible('feed');
-        regenerateFlavorAppIfStale(context, settings, {
-            cacheKey: twitterCacheKey('feed'),
-            trackingSet: twitterGeneratingKeys,
-            regenerate: () => runTwitterGeneration('feed'),
-        });
         return;
     }
 
@@ -1357,11 +1350,6 @@ function showScreen(view) {
         title.textContent = currentTwitterProfileCharacter;
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         rerenderTwitterScreenIfVisible('profile', currentTwitterProfileCharacter);
-        regenerateFlavorAppIfStale(context, settings, {
-            cacheKey: twitterCacheKey('profile', currentTwitterProfileCharacter),
-            trackingSet: twitterGeneratingKeys,
-            regenerate: () => runTwitterGeneration('profile', currentTwitterProfileCharacter),
-        });
         return;
     }
 
