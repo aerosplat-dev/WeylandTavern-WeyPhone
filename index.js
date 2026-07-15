@@ -44,7 +44,14 @@ const HOME_PANEL_SIZE = { width: 360, height: 466 };
 
 const PHONE_APP_LABELS = { chronicle: 'The Chronicle', discord: 'Discord', yikyak: 'Yik Yak' };
 const phoneAppGeneratingIds = new Set(); // tracks which app keys currently have a generation in flight
-const DEFAULT_PHONE_APP_MAX_TOKENS = 1024;
+// Flavor-app generation inherits the main roleplay's REAL system prompt (see runFlavorAppGeneration
+// below), which mandates the platform's own multi-section <analysis> block before any actual reply
+// content — unlike a normal WeyPhone texting turn, this isn't optional or skippable output, so the
+// completion budget has to cover the analysis block AND the app content itself. runFlavorAppGeneration
+// reads the user's live main-chat response-length setting (context.chatCompletionSettings.openai_max_tokens)
+// instead, so the budget always matches what a real roleplay turn gets; this is only the fallback for
+// the (not normally reachable) case where that setting is unset/unreadable.
+const DEFAULT_PHONE_APP_MAX_TOKENS = 5000;
 // Unlike a WeyPhone conversation's own tetheredHistoryCap (per-conversation, user-configurable,
 // defaults to uncapped), flavor-app generation had NO cap at all on how much of the main
 // roleplay's real history it includes as literal message history — every refresh sent the ENTIRE
@@ -370,8 +377,13 @@ async function runFlavorAppGeneration({ trackingSet, trackingKey, rerender, buil
 
         const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
         const profileId = resolveProfileId(settings, activeProfileId);
+        // Same budget the main roleplay itself generates with (context.chatCompletionSettings is
+        // the live oai_settings object) — falls back to DEFAULT_PHONE_APP_MAX_TOKENS only if that
+        // setting is ever unreadable, so this stays in lockstep with the user's own response-length
+        // slider rather than drifting out of sync with a second hardcoded number.
+        const maxTokens = context.chatCompletionSettings?.openai_max_tokens || DEFAULT_PHONE_APP_MAX_TOKENS;
         const result = await sendMessage({
-            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_PHONE_APP_MAX_TOKENS),
+            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, maxTokens),
             profileId,
             messages,
         });
