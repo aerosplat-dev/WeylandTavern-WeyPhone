@@ -3,7 +3,7 @@ import { EXCLUDED_CHARACTER_NAMES } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor } from './lib/storage.js';
-import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
+import { buildSystemPrompt, buildGroupSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
 import { createPanelMarkup, renderMessagesScreen, renderContactComposerScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen, setRegistrarToggleState } from './lib/panel.js';
 import { getFavoriteEntryNames, toggleFavorite } from './lib/favorites.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
@@ -819,7 +819,8 @@ async function generateMemory(conversationId, conversation, context, settings, o
 // prompt, builds the request (including the always-texting instructions, phone-format history,
 // and any pinned memories), sends it, and stores each extracted message from the reply.
 async function generateReply(conversationId, conversation, context, settings) {
-    const entryName = conversation.participants[0]; // solo conversation: exactly one participant
+    const isGroup = conversation.participants.length > 1;
+    const entryName = conversation.participants[0]; // solo conversation: exactly one participant; group: representative fallback only (see entryNameForMacros below)
 
     // generatingConversationIds.add()/refreshVisibleScreen() MUST stay inside this try block —
     // placing them before `try` has leaked a permanently-stuck "generating" conversation twice
@@ -829,8 +830,30 @@ async function generateReply(conversationId, conversation, context, settings) {
     try {
         generatingConversationIds.add(conversationId);
         refreshVisibleScreen();
+        // Group conversations (2+ participants) ALWAYS use subbot content for every participant,
+        // never a full-bot character.system_prompt/personality — see buildGroupSystemPrompt's own
+        // docstring in lib/generation.js for why. Solo conversations keep the existing Task 8
+        // hasFullBotEntry branch, unchanged.
         let resolved;
-        if (hasFullBotEntry(entryName)) {
+        let participantPrompts;
+        if (isGroup) {
+            const roster = await getCastRoster();
+            participantPrompts = await Promise.all(conversation.participants.map(async (name) => {
+                const rosterEntry = roster.find(c => c.entryName === name);
+                const macroKey = rosterEntry ? rosterEntry.macroKey : null;
+                return { entryName: name, personalityText: macroKey ? resolveSubbotPersonality(strings, macroKey) : '' };
+            }));
+            // Base prompt + post-history-instructions are shared platform-wide content (not
+            // per-participant), so they're resolved the same way resolveSubbotPrompt/
+            // resolveCharacterPrompt do, just without a per-character personality/description
+            // (those live in participantPrompts above instead, one per roster line).
+            const promptChoice = context.variables.global.get('PromptChoice') || 'Current Prompt';
+            const ravEntry = resolveMasterPrompt(ravs, promptChoice);
+            const htmlEnabled = context.variables.global.get('HTML!') === 'Enabled';
+            const rpFocus = context.variables.global.get('RPFocus') || '';
+            const postHistory = resolvePostHistoryInstructions(ravEntry, { htmlEnabled, rpFocus });
+            resolved = { systemPrompt: ravEntry.teg, postHistory, descriptionText: '', personalityText: '' };
+        } else if (hasFullBotEntry(entryName)) {
             const character = resolveConversationCharacter(context, entryName);
             if (!character) {
                 toastr.error(`Could not find character "${entryName}" for this conversation.`, 'WeyPhone');
@@ -870,14 +893,31 @@ async function generateReply(conversationId, conversation, context, settings) {
         const memoryBlock = joinMemoriesForInjection(pinnedMemories);
         const tetheredBlock = await buildTetheredContext(context, conversation);
         const worldInfoAfterWithMemory = joinNonEmptySections([worldInfo.worldInfoAfter, memoryBlock, tetheredBlock]);
-        const systemPromptText = buildSystemPrompt({
-            systemPrompt: resolved.systemPrompt,
-            worldInfoBefore: worldInfo.worldInfoBefore,
-            descriptionText: resolved.descriptionText,
-            personalityText: resolved.personalityText,
-            scenarioText: '',
-            worldInfoAfter: worldInfoAfterWithMemory,
-        });
+        // World info / pinned memories / the tethered [TETHERED VIEW] block are all resolved
+        // against the CONVERSATION (historyForScan, conversationId, conversation itself) — none of
+        // them depend on which participant is speaking, so group conversations keep exactly the
+        // same worldInfo/memory/tethered content solo conversations get. buildGroupSystemPrompt's
+        // own signature only takes {basePrompt, postHistory, participants} (no WI slots — see its
+        // docstring/tests in lib/generation.js), so the WI/memory/tethered block is folded in here
+        // instead, immediately after the roster+judgment-instruction core, mirroring where it sits
+        // in the solo path's buildSystemPrompt ordering (main -> WIbefore -> ... -> WIafter).
+        let systemPromptText;
+        let entryNameForMacros;
+        if (isGroup) {
+            const groupCore = buildGroupSystemPrompt({ basePrompt: resolved.systemPrompt, postHistory: '', participants: participantPrompts });
+            systemPromptText = joinNonEmptySections([groupCore, worldInfo.worldInfoBefore, worldInfoAfterWithMemory]);
+            entryNameForMacros = conversation.participants[0]; // representative only — a group reply can name multiple speakers itself
+        } else {
+            systemPromptText = buildSystemPrompt({
+                systemPrompt: resolved.systemPrompt,
+                worldInfoBefore: worldInfo.worldInfoBefore,
+                descriptionText: resolved.descriptionText,
+                personalityText: resolved.personalityText,
+                scenarioText: '',
+                worldInfoAfter: worldInfoAfterWithMemory,
+            });
+            entryNameForMacros = entryName;
+        }
         const fullSystemPromptText = joinNonEmptySections([systemPromptText, resolved.postHistory, TEXTING_MODE_INSTRUCTIONS]);
 
         const userName = context.name1 || 'User';
@@ -889,11 +929,11 @@ async function generateReply(conversationId, conversation, context, settings) {
             substituteParams: context.substituteParams,
             content: fullSystemPromptText,
             userName,
-            charName: entryName,
+            charName: entryNameForMacros,
         });
         const lastMessage = conversation.messages[conversation.messages.length - 1];
-        const reconstructedHistory = reconstructHistoryAsPhoneFormat(historyForScan, { charName: entryName, userName }, formatClockTime);
-        const wrappedUserMessage = reconstructHistoryAsPhoneFormat([lastMessage], { charName: entryName, userName }, formatClockTime)[0].content;
+        const reconstructedHistory = reconstructHistoryAsPhoneFormat(historyForScan, { charName: entryNameForMacros, userName }, formatClockTime);
+        const wrappedUserMessage = reconstructHistoryAsPhoneFormat([lastMessage], { charName: entryNameForMacros, userName }, formatClockTime)[0].content;
 
         const messages = buildMessages({
             systemPromptText: substitutedSystemPromptText,
@@ -924,8 +964,25 @@ async function generateReply(conversationId, conversation, context, settings) {
         if (parsed.messages.length === 0) {
             throw new Error('The model did not return any usable content.');
         }
-        for (const messageText of parsed.messages) {
-            appendMessage(settings, conversationId, { role: 'assistant', content: messageText, timestamp: genTimestamp() });
+        if (isGroup) {
+            // parseReply's own output (parsed.messages, checked above only as a generic
+            // empty-response guard) discards each line's [Name] field — re-extract the real
+            // speaker per line from the raw reply text here instead of storing parsed.messages'
+            // combined/name-less content, one appendMessage call per Incoming¦ line so each
+            // stored message carries its own correct `speaker`. Deliberately does not modify
+            // parseReply itself (out of scope for this task — see Task 9 brief).
+            const rawLines = replyText.split('\n').filter(line => line.startsWith('Incoming¦'));
+            for (const line of rawLines) {
+                const parts = line.split('¦');
+                const speaker = parts[2] ?? entryNameForMacros;
+                const text = parts.slice(3).join('¦').trim();
+                if (!text) continue;
+                appendMessage(settings, conversationId, { role: 'assistant', content: text, speaker, timestamp: genTimestamp() });
+            }
+        } else {
+            for (const messageText of parsed.messages) {
+                appendMessage(settings, conversationId, { role: 'assistant', content: messageText, timestamp: genTimestamp() });
+            }
         }
         rerenderIfStillViewing(conversationId, conversation.messages);
         context.saveSettingsDebounced();

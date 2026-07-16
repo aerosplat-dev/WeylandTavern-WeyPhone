@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution } from '../lib/generation.js';
+import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, buildGroupSystemPrompt } from '../lib/generation.js';
 
 test('buildSystemPrompt joins non-empty sections in main->WIbefore->description->personality->scenario->WIafter order', () => {
     const result = buildSystemPrompt({
@@ -194,6 +194,31 @@ test('reconstructHistoryAsPhoneFormat returns an empty array for empty history',
     assert.deepEqual(reconstructHistoryAsPhoneFormat([], { charName: 'Rosa', userName: 'Ava' }, () => ''), []);
 });
 
+test('reconstructHistoryAsPhoneFormat uses a stored per-message speaker over the default charName (group conversations)', () => {
+    // In a group conversation, `charName` is only a representative fallback (see
+    // entryNameForMacros in index.js's generateReply) — each stored assistant message from a
+    // prior turn carries its own real `speaker` (set by the group branch's per-line
+    // appendMessage calls), which must win over the generic charName when reconstructing
+    // history, or every past speaker collapses to whichever name happened to be passed in.
+    const history = [
+        { role: 'user', content: 'hey both', timestamp: 1000 },
+        { role: 'assistant', content: 'hi from Nathan', timestamp: 2000, speaker: 'Nathan Ashford' },
+        { role: 'assistant', content: 'hi from Emily', timestamp: 3000, speaker: 'Emily Adler' },
+    ];
+    const result = reconstructHistoryAsPhoneFormat(history, { charName: 'Nathan Ashford', userName: 'Ava' }, (t) => `T${t}`);
+    assert.deepEqual(result, [
+        { role: 'user', content: 'Outgoing¦T1000¦Ava¦hey both' },
+        { role: 'assistant', content: 'Incoming¦T2000¦Nathan Ashford¦hi from Nathan' },
+        { role: 'assistant', content: 'Incoming¦T3000¦Emily Adler¦hi from Emily' },
+    ]);
+});
+
+test('reconstructHistoryAsPhoneFormat falls back to charName when a message has no stored speaker (solo conversations)', () => {
+    const history = [{ role: 'assistant', content: 'solo reply', timestamp: 500 }];
+    const result = reconstructHistoryAsPhoneFormat(history, { charName: 'Rosa', userName: 'Ava' }, (t) => `T${t}`);
+    assert.deepEqual(result, [{ role: 'assistant', content: 'Incoming¦T500¦Rosa¦solo reply' }]);
+});
+
 test('reconstructHistoryAsPhoneFormat preserves turn order', () => {
     const history = [
         { role: 'user', content: 'a', timestamp: 1 },
@@ -276,4 +301,33 @@ test('buildMessages + applyMacroSubstitution resolves real macros in both the sy
     assert.equal(messages[0].content, 'System prompt for Rosa, greeting Ava.');
     assert.equal(messages[messages.length - 1].content, 'Roster: Ava met Karmen. Bio: Karmen bio text.');
     assert.ok(!messages.some(m => m.content.includes('{{user}}') || m.content.includes('{{getvar::')));
+});
+
+test('buildGroupSystemPrompt lists every participant with their personality text and the per-character judgment instruction', () => {
+    const result = buildGroupSystemPrompt({
+        basePrompt: 'BASE SYSTEM PROMPT',
+        postHistory: 'POST HISTORY TEXT',
+        participants: [
+            { entryName: 'Nathan Ashford', personalityText: '[NATHAN INFO]\nNathan is...' },
+            { entryName: 'Emily Adler', personalityText: '[EMILY ADLER INFO]\nEmily is...' },
+        ],
+    });
+    assert.match(result, /BASE SYSTEM PROMPT/);
+    assert.match(result, /Nathan Ashford/);
+    assert.match(result, /\[NATHAN INFO\]/);
+    assert.match(result, /Emily Adler/);
+    assert.match(result, /\[EMILY ADLER INFO\]/);
+    assert.match(result, /would.*respond/i);
+    assert.match(result, /POST HISTORY TEXT/);
+});
+
+test('buildGroupSystemPrompt places the per-character judgment instruction before postHistory', () => {
+    const result = buildGroupSystemPrompt({
+        basePrompt: 'BASE',
+        postHistory: 'POSTHISTORY_MARKER',
+        participants: [{ entryName: 'A', personalityText: 'A INFO' }],
+    });
+    const judgmentIndex = result.search(/would.*respond/i);
+    const postHistoryIndex = result.indexOf('POSTHISTORY_MARKER');
+    assert.ok(judgmentIndex < postHistoryIndex);
 });
