@@ -3,7 +3,7 @@ import { EXCLUDED_CHARACTER_NAMES } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor } from './lib/storage.js';
-import { buildSystemPrompt, buildGroupSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
+import { buildSystemPrompt, buildGroupSystemPrompt, buildMessages, resolveProfileId, resolveModelOverride, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
 import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen, setRegistrarToggleState } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
@@ -515,9 +515,12 @@ async function runFlavorAppGeneration({ trackingSet, trackingKey, rerender, buil
         // right now. Flavor apps are meant to track the live main-chat model exactly like Messages
         // does — omitting this was a real bug (flavor-app generation silently sent a stale/possibly
         // invalid saved model, causing provider-side request failures the Messages path never hit
-        // since it already had this override).
+        // since it already had this override). An explicit settings.modelId (WeyPhone's own
+        // extension settings panel) overrides even this live-model tracking — see
+        // resolveModelOverride's own docstring.
         const liveModel = context.getChatCompletionModel?.();
-        const overridePayload = liveModel ? { model: liveModel } : undefined;
+        const modelOverride = resolveModelOverride(settings, liveModel);
+        const overridePayload = modelOverride ? { model: modelOverride } : undefined;
         const result = await sendMessage({
             sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, maxTokens, undefined, overridePayload),
             profileId,
@@ -995,8 +998,12 @@ async function generateReply(conversationId, conversation, context, settings) {
         // profile's own defaults, letting api-url/auth/preset still come from the pinned profile
         // while the model itself stays live. Falls back to the profile's own (possibly stale) model
         // if the live model can't be resolved for any reason, rather than sending a broken override.
+        // An explicit settings.modelId (WeyPhone's own extension settings panel — see settings.html)
+        // overrides even this live-model tracking, letting a user deliberately generate WeyPhone
+        // content with a different model than the main roleplay chat — see resolveModelOverride.
         const liveModel = context.getChatCompletionModel?.();
-        const overridePayload = liveModel ? { model: liveModel } : undefined;
+        const modelOverride = resolveModelOverride(settings, liveModel);
+        const overridePayload = modelOverride ? { model: modelOverride } : undefined;
         const result = await sendMessage({
             sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, DEFAULT_MAX_TOKENS, undefined, overridePayload),
             profileId,
@@ -2082,8 +2089,54 @@ function initPanel() {
     });
 }
 
+/**
+ * Renders WeyPhone's own drawer into SillyTavern's native extension settings panel
+ * (#extensions_settings2 — the same standard location Weyland-Proofreader uses, NOT a custom
+ * WeyPhone-built modal), so users can point WeyPhone's own generation at a different Connection
+ * Profile and/or model than whatever the main roleplay chat is currently using, entirely
+ * independent of it. Both fields are read by resolveProfileId/resolveModelOverride at every
+ * WeyPhone generation call site (Messages, The Chronicle, Discord, Yik Yak, Twitter) — left blank,
+ * WeyPhone keeps tracking the main chat's active profile/model exactly as it already did.
+ */
+async function initExtensionSettingsPanel() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const template = await context.renderExtensionTemplateAsync('third-party/Weyland-WeyPhone', 'settings');
+    const container = document.getElementById('extensions_settings2');
+    if (!container) return;
+    container.insertAdjacentHTML('beforeend', template);
+
+    const debugCheckbox = document.getElementById('wp-settings-debug-checkbox');
+    debugCheckbox.checked = settings.debug;
+    debugCheckbox.addEventListener('input', () => {
+        settings.debug = debugCheckbox.checked;
+        context.saveSettingsDebounced();
+    });
+
+    const modelInput = document.getElementById('wp-settings-model-input');
+    modelInput.value = settings.modelId;
+    modelInput.addEventListener('input', () => {
+        settings.modelId = modelInput.value.trim();
+        context.saveSettingsDebounced();
+    });
+
+    try {
+        context.ConnectionManagerRequestService.handleDropdown(
+            '#wp-settings-profile-select',
+            settings.connectionProfileId,
+            (profile) => {
+                settings.connectionProfileId = profile?.id ?? '';
+                context.saveSettingsDebounced();
+            },
+        );
+    } catch (error) {
+        log('Connection Manager not available for the WeyPhone settings panel:', error);
+    }
+}
+
 jQuery(async () => {
     initPanel();
     getCastRoster();
+    initExtensionSettingsPanel();
     log('WeyPhone initialized');
 });

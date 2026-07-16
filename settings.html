@@ -1,16 +1,28 @@
-<div id="weyphone_settings">
+<div id="wp-extension-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>WeyPhone</b>
+            <b data-i18n="WeyPhone">WeyPhone</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
+
         <div class="inline-drawer-content">
-            <label class="checkbox_label" for="wp_debug">
-                <input id="wp_debug" type="checkbox" />
-                Debug logging
+            <label class="checkbox_label" for="wp-settings-debug-checkbox" title="Debug WeyPhone" data-i18n="[title]Debug WeyPhone">
+                <input id="wp-settings-debug-checkbox" type="checkbox">
+                <span data-i18n="Debug">Debug</span>
             </label>
-            <label for="wp_profile">Connection Profile Override</label>
-            <div id="wp_profile"></div>
+
+            <div class="flex-container alignItemsBaseline" style="margin-top: 10px;">
+                <h4 class="margin0" data-i18n="Generation Connection">Generation Connection</h4>
+                <a href="https://docs.sillytavern.app/usage/core-concepts/connection-profiles" target="_blank" class="notes-link">
+                    <span class="fa-solid fa-circle-question note-link-span"></span>
+                </a>
+            </div>
+            <small data-i18n="wpSettingsProfileHint">Pick a Connection Profile for WeyPhone's own generation (Messages, The Chronicle, Discord, Yik Yak, Twitter). Leave unset to keep using whatever profile/API is currently active for the main roleplay chat. Manage profiles in the Connection Manager panel above.</small>
+            <select id="wp-settings-profile-select" class="text_pole"></select>
+
+            <label for="wp-settings-model-input" data-i18n="Model ID" style="margin-top: 5px;">Model ID</label>
+            <input id="wp-settings-model-input" class="text_pole" type="text" placeholder="Leave blank to match the main roleplay chat's model" />
+            <small data-i18n="wpSettingsModelHint">Overrides just the model WeyPhone generates with, independent of the profile above — useful for running WeyPhone on a different model than the main roleplay chat. Leave blank to track the main chat's active model automatically.</small>
         </div>
     </div>
 </div>

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, buildGroupSystemPrompt } from '../lib/generation.js';
+import { buildSystemPrompt, buildMessages, resolveProfileId, resolveModelOverride, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, buildGroupSystemPrompt } from '../lib/generation.js';
 
 test('buildSystemPrompt joins non-empty sections in main->WIbefore->description->personality->scenario->WIafter order', () => {
     const result = buildSystemPrompt({
@@ -150,6 +150,29 @@ test('resolveProfileId falls back to the active profile when no override is set'
 
 test('resolveProfileId returns an empty string when neither is set', () => {
     assert.equal(resolveProfileId({ connectionProfileId: '' }, ''), '');
+});
+
+test('resolveModelOverride prefers an explicit settings.modelId over the live main-chat model', () => {
+    assert.equal(resolveModelOverride({ modelId: 'gpt-5-explicit' }, 'claude-sonnet-live'), 'gpt-5-explicit');
+});
+
+test('resolveModelOverride trims whitespace from an explicit settings.modelId', () => {
+    assert.equal(resolveModelOverride({ modelId: '  gpt-5-explicit  ' }, 'claude-sonnet-live'), 'gpt-5-explicit');
+});
+
+test('resolveModelOverride falls back to the live model when settings.modelId is blank/whitespace-only', () => {
+    assert.equal(resolveModelOverride({ modelId: '' }, 'claude-sonnet-live'), 'claude-sonnet-live');
+    assert.equal(resolveModelOverride({ modelId: '   ' }, 'claude-sonnet-live'), 'claude-sonnet-live');
+});
+
+test('resolveModelOverride returns null when neither an explicit modelId nor a live model is available', () => {
+    assert.equal(resolveModelOverride({ modelId: '' }, null), null);
+    assert.equal(resolveModelOverride({ modelId: '' }, undefined), null);
+    assert.equal(resolveModelOverride({ modelId: '' }, ''), null);
+});
+
+test('resolveModelOverride works when settings.modelId itself is missing entirely (not just empty)', () => {
+    assert.equal(resolveModelOverride({}, 'claude-sonnet-live'), 'claude-sonnet-live');
 });
 
 test('sendMessage throws when no profileId is available', async () => {
