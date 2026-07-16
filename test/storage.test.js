@@ -25,6 +25,7 @@ import {
     setTetheredSettings,
     getThreadsFor,
     findMostRecentThread,
+    migrateParticipantsField,
     genTimestamp,
     DEFAULT_MEMORY_PRIMARY_MODEL,
     DEFAULT_MEMORY_BACKUP_MODEL,
@@ -60,8 +61,8 @@ test('genTimestamp increments by 1 to break ties when two calls land on the same
 
 test('createConversation creates a conversation with a generated id and empty messages', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
-    assert.equal(conversation.charName, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
+    assert.deepEqual(conversation.participants, ['Rosa']);
     assert.deepEqual(conversation.messages, []);
     assert.equal(typeof conversation.id, 'string');
     assert.ok(conversation.id.length > 0);
@@ -72,18 +73,18 @@ test('createConversation creates a conversation with a generated id and empty me
 
 test('createConversation generates distinct ids for successive calls', () => {
     const settings = { conversations: {} };
-    const a = createConversation(settings, 'Rosa');
-    const b = createConversation(settings, 'Rosa');
+    const a = createConversation(settings, ['Rosa']);
+    const b = createConversation(settings, ['Rosa']);
     assert.notEqual(a.id, b.id);
 });
 
 test('createConversation allows multiple conversations with the same character', () => {
     const settings = { conversations: {} };
-    const a = createConversation(settings, 'Rosa');
-    const b = createConversation(settings, 'Rosa');
+    const a = createConversation(settings, ['Rosa']);
+    const b = createConversation(settings, ['Rosa']);
     assert.equal(Object.keys(settings.conversations).length, 2);
-    assert.equal(getConversation(settings, a.id).charName, 'Rosa');
-    assert.equal(getConversation(settings, b.id).charName, 'Rosa');
+    assert.deepEqual(getConversation(settings, a.id).participants, ['Rosa']);
+    assert.deepEqual(getConversation(settings, b.id).participants, ['Rosa']);
 });
 
 test('getConversation returns undefined for an unknown id', () => {
@@ -93,7 +94,7 @@ test('getConversation returns undefined for an unknown id', () => {
 
 test('appendMessage pushes a message and updates lastActive', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     const before = conversation.createdAt;
     const result = appendMessage(settings, conversation.id, { role: 'user', content: 'hi' });
     assert.deepEqual(result.messages, [{ role: 'user', content: 'hi' }]);
@@ -107,7 +108,7 @@ test('appendMessage returns undefined and is a no-op for an unknown conversation
 
 test('editMessage replaces the content at the given index', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'user', content: 'original' });
     editMessage(settings, conversation.id, 0, 'edited');
     assert.equal(getConversation(settings, conversation.id).messages[0].content, 'edited');
@@ -115,7 +116,7 @@ test('editMessage replaces the content at the given index', () => {
 
 test('editMessage does not change role or lastActive', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'assistant', content: 'original' });
     const lastActiveBefore = getConversation(settings, conversation.id).lastActive;
     editMessage(settings, conversation.id, 0, 'edited');
@@ -126,7 +127,7 @@ test('editMessage does not change role or lastActive', () => {
 
 test('editMessage is a no-op for an out-of-range index or unknown conversation', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'user', content: 'only message' });
     editMessage(settings, conversation.id, 5, 'should not apply');
     assert.equal(getConversation(settings, conversation.id).messages[0].content, 'only message');
@@ -135,7 +136,7 @@ test('editMessage is a no-op for an out-of-range index or unknown conversation',
 
 test('deleteMessage removes the message at the given index', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'user', content: 'first' });
     appendMessage(settings, conversation.id, { role: 'assistant', content: 'second' });
     deleteMessage(settings, conversation.id, 0);
@@ -145,7 +146,7 @@ test('deleteMessage removes the message at the given index', () => {
 
 test('deleteMessage is a no-op for an out-of-range index or unknown conversation', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'user', content: 'only message' });
     deleteMessage(settings, conversation.id, 5);
     assert.equal(getConversation(settings, conversation.id).messages.length, 1);
@@ -154,7 +155,7 @@ test('deleteMessage is a no-op for an out-of-range index or unknown conversation
 
 test('deleteMessages removes all given indices in one pass', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'user', content: 'a' });
     appendMessage(settings, conversation.id, { role: 'assistant', content: 'b' });
     appendMessage(settings, conversation.id, { role: 'user', content: 'c' });
@@ -167,7 +168,7 @@ test('deleteMessages removes all given indices in one pass', () => {
 
 test('deleteMessages is order-independent (descending, ascending, unsorted indices all work)', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     for (const c of ['a', 'b', 'c', 'd', 'e']) appendMessage(settings, conversation.id, { role: 'user', content: c });
     deleteMessages(settings, conversation.id, [3, 0, 1]);
     assert.deepEqual(getConversation(settings, conversation.id).messages.map(m => m.content), ['c', 'e']);
@@ -175,7 +176,7 @@ test('deleteMessages is order-independent (descending, ascending, unsorted indic
 
 test('deleteMessages is a no-op for an empty index list or unknown conversation', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'user', content: 'only message' });
     deleteMessages(settings, conversation.id, []);
     assert.equal(getConversation(settings, conversation.id).messages.length, 1);
@@ -184,7 +185,7 @@ test('deleteMessages is a no-op for an empty index list or unknown conversation'
 
 test('deleteConversation removes the conversation entirely', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     deleteConversation(settings, conversation.id);
     assert.equal(getConversation(settings, conversation.id), undefined);
     assert.equal(Object.keys(settings.conversations).length, 0);
@@ -197,22 +198,22 @@ test('deleteConversation on an unknown id does not throw', () => {
 
 test('getAllConversationSummaries returns summaries sorted by lastActive descending', () => {
     const settings = { conversations: {} };
-    const a = createConversation(settings, 'Rosa');
+    const a = createConversation(settings, ['Rosa']);
     appendMessage(settings, a.id, { role: 'user', content: 'first conversation' });
-    const b = createConversation(settings, 'Ava');
+    const b = createConversation(settings, ['Ava']);
     appendMessage(settings, b.id, { role: 'user', content: 'second conversation' });
 
     const summaries = getAllConversationSummaries(settings);
     assert.equal(summaries.length, 2);
     assert.equal(summaries[0].id, b.id); // most recently active first
-    assert.equal(summaries[0].charName, 'Ava');
+    assert.deepEqual(summaries[0].participants, ['Ava']);
     assert.equal(summaries[0].lastMessageSnippet, 'second conversation');
     assert.equal(summaries[1].id, a.id);
 });
 
 test('getAllConversationSummaries reports an empty snippet for a conversation with no messages', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     const summaries = getAllConversationSummaries(settings);
     assert.equal(summaries[0].lastMessageSnippet, '');
     assert.equal(summaries[0].id, conversation.id);
@@ -228,7 +229,7 @@ test('migrateLegacyConversations converts a charName-keyed entry with no id into
     migrateLegacyConversations(settings);
     assert.equal(settings.conversations.Rosa, undefined);
     const migrated = Object.values(settings.conversations)[0];
-    assert.equal(migrated.charName, 'Rosa');
+    assert.deepEqual(migrated.participants, ['Rosa']);
     assert.equal(typeof migrated.id, 'string');
     assert.deepEqual(migrated.messages, [{ role: 'user', content: 'hi' }]);
     assert.equal(migrated.lastActive, 123);
@@ -237,7 +238,7 @@ test('migrateLegacyConversations converts a charName-keyed entry with no id into
 
 test('createConversation sets default memory fields on a new conversation', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     assert.deepEqual(conversation.memories, []);
     assert.equal(conversation.memoryThreshold, 100);
     assert.equal(conversation.memoryConnectionProfileId, '');
@@ -248,7 +249,7 @@ test('createConversation sets default memory fields on a new conversation', () =
 
 test('createMemory adds a pinned-by-default memory and returns it', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     const memory = createMemory(settings, conversation.id, 'They met at a party.');
     assert.equal(memory.content, 'They met at a party.');
     assert.equal(memory.pinned, true);
@@ -260,7 +261,7 @@ test('createMemory adds a pinned-by-default memory and returns it', () => {
 
 test('createMemory accepts pinned:false and a sourceRange override', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     const memory = createMemory(settings, conversation.id, 'text', { pinned: false, sourceRange: { from: 0, to: 5 } });
     assert.equal(memory.pinned, false);
     assert.deepEqual(memory.sourceRange, { from: 0, to: 5 });
@@ -273,7 +274,7 @@ test('createMemory returns undefined for an unknown conversation id', () => {
 
 test('editMemory updates a memory\'s content in place', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     const memory = createMemory(settings, conversation.id, 'original');
     editMemory(settings, conversation.id, memory.id, 'edited');
     assert.equal(conversation.memories[0].content, 'edited');
@@ -281,7 +282,7 @@ test('editMemory updates a memory\'s content in place', () => {
 
 test('editMemory is a no-op for an unknown memory id', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     createMemory(settings, conversation.id, 'original');
     editMemory(settings, conversation.id, 'nonexistent', 'edited');
     assert.equal(conversation.memories[0].content, 'original');
@@ -289,7 +290,7 @@ test('editMemory is a no-op for an unknown memory id', () => {
 
 test('deleteMemory removes the memory by id', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     const memory = createMemory(settings, conversation.id, 'text');
     deleteMemory(settings, conversation.id, memory.id);
     assert.deepEqual(conversation.memories, []);
@@ -297,7 +298,7 @@ test('deleteMemory removes the memory by id', () => {
 
 test('deleteMemory is a no-op for an unknown memory id', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     createMemory(settings, conversation.id, 'text');
     deleteMemory(settings, conversation.id, 'nonexistent');
     assert.equal(conversation.memories.length, 1);
@@ -305,7 +306,7 @@ test('deleteMemory is a no-op for an unknown memory id', () => {
 
 test('setMemoryPinned toggles a memory\'s pinned state', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     const memory = createMemory(settings, conversation.id, 'text');
     setMemoryPinned(settings, conversation.id, memory.id, false);
     assert.equal(conversation.memories[0].pinned, false);
@@ -315,7 +316,7 @@ test('setMemoryPinned toggles a memory\'s pinned state', () => {
 
 test('getPinnedMemories returns only pinned memories', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     const a = createMemory(settings, conversation.id, 'pinned one');
     const b = createMemory(settings, conversation.id, 'unpinned one', { pinned: false });
     const result = getPinnedMemories(settings, conversation.id);
@@ -329,7 +330,7 @@ test('getPinnedMemories returns an empty array for an unknown conversation id', 
 
 test('setMemorySettings partially updates only the provided fields', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     setMemorySettings(settings, conversation.id, { memoryThreshold: 50 });
     assert.equal(conversation.memoryThreshold, 50);
     assert.equal(conversation.memoryConnectionProfileId, '');
@@ -379,7 +380,7 @@ test('migrateMemoryFields does not overwrite existing memory data', () => {
 
 test('migrateLegacyConversations leaves already-migrated (id-bearing) entries untouched', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Ava');
+    const conversation = createConversation(settings, ['Ava']);
     migrateLegacyConversations(settings);
     assert.equal(Object.keys(settings.conversations).length, 1);
     assert.equal(settings.conversations[conversation.id], conversation);
@@ -401,18 +402,18 @@ test('migrateLegacyConversations handles multiple legacy entries independently',
         },
     };
     migrateLegacyConversations(settings);
-    const names = Object.values(settings.conversations).map(c => c.charName).sort();
+    const names = Object.values(settings.conversations).map(c => c.participants[0]).sort();
     assert.deepEqual(names, ['Kai', 'Rosa']);
 });
 
 test('migrateLegacyConversations leaves a modern entry untouched while migrating a legacy one alongside it', () => {
     const settings = { conversations: {} };
-    const modern = createConversation(settings, 'Ava');
+    const modern = createConversation(settings, ['Ava']);
     settings.conversations.Rosa = { messages: [], lastActive: 100 };
     migrateLegacyConversations(settings);
     assert.equal(settings.conversations[modern.id], modern);
     assert.equal(settings.conversations.Rosa, undefined);
-    const migratedNames = Object.values(settings.conversations).map(c => c.charName).sort();
+    const migratedNames = Object.values(settings.conversations).map(c => c.participants[0]).sort();
     assert.deepEqual(migratedNames, ['Ava', 'Rosa']);
 });
 
@@ -427,7 +428,7 @@ test('migrateLegacyConversations is idempotent across repeated calls', () => {
 
 test('discardTrailingReply removes trailing assistant messages back to the last user message', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'user', content: 'hi' });
     appendMessage(settings, conversation.id, { role: 'assistant', content: 'reply 1' });
     appendMessage(settings, conversation.id, { role: 'assistant', content: 'reply 2' });
@@ -438,7 +439,7 @@ test('discardTrailingReply removes trailing assistant messages back to the last 
 
 test('discardTrailingReply is a no-op and returns false when there is no trailing assistant run', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'user', content: 'hi' });
     const result = discardTrailingReply(settings, conversation.id);
     assert.equal(result, false);
@@ -447,13 +448,13 @@ test('discardTrailingReply is a no-op and returns false when there is no trailin
 
 test('discardTrailingReply returns false for an empty conversation', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     assert.equal(discardTrailingReply(settings, conversation.id), false);
 });
 
 test('discardTrailingReply returns false when there is no user message before the trailing assistant run', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     appendMessage(settings, conversation.id, { role: 'assistant', content: 'unsolicited' });
     const result = discardTrailingReply(settings, conversation.id);
     assert.equal(result, false);
@@ -524,14 +525,14 @@ test('getLastGeneratedMemory returns null for a conversation with no memories', 
 
 test('createConversation sets default tethered fields on a new conversation', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     assert.equal(conversation.tethered, false);
     assert.equal(conversation.tetheredHistoryCap, null);
 });
 
 test('setTetheredSettings partially updates only the provided fields', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     setTetheredSettings(settings, conversation.id, { tethered: true });
     assert.equal(conversation.tethered, true);
     assert.equal(conversation.tetheredHistoryCap, null);
@@ -542,7 +543,7 @@ test('setTetheredSettings partially updates only the provided fields', () => {
 
 test('setTetheredSettings can explicitly clear tetheredHistoryCap back to null', () => {
     const settings = { conversations: {} };
-    const conversation = createConversation(settings, 'Rosa');
+    const conversation = createConversation(settings, ['Rosa']);
     setTetheredSettings(settings, conversation.id, { tetheredHistoryCap: 25 });
     setTetheredSettings(settings, conversation.id, { tetheredHistoryCap: null });
     assert.equal(conversation.tetheredHistoryCap, null);
@@ -571,24 +572,68 @@ test('migrateTetheredFields does not overwrite existing tethered data', () => {
 
 test('getThreadsFor sorts most-recent-first', () => {
     const settings = { conversations: {} };
-    const older = createConversation(settings, 'Blake');
-    const newer = createConversation(settings, 'Blake');
+    const older = createConversation(settings, ['Blake']);
+    const newer = createConversation(settings, ['Blake']);
     newer.lastActive = older.lastActive + 1000;
-    const threads = getThreadsFor(settings, 'Blake');
+    const threads = getThreadsFor(settings, ['Blake']);
     assert.equal(threads[0].id, newer.id);
     assert.equal(threads[1].id, older.id);
 });
 
 test('findMostRecentThread returns the most recently active match among several threads for the same character', () => {
     const settings = { conversations: {} };
-    const first = createConversation(settings, 'Blake');
-    const second = createConversation(settings, 'Blake');
+    const first = createConversation(settings, ['Blake']);
+    const second = createConversation(settings, ['Blake']);
     first.lastActive = second.lastActive + 1000;
-    const found = findMostRecentThread(settings, 'Blake');
+    const found = findMostRecentThread(settings, ['Blake']);
     assert.equal(found.id, first.id);
 });
 
 test('findMostRecentThread returns undefined for a character with no threads at all', () => {
     const settings = { conversations: {} };
-    assert.equal(findMostRecentThread(settings, 'NoSuchCharacter'), undefined);
+    assert.equal(findMostRecentThread(settings, ['NoSuchCharacter']), undefined);
+});
+
+test('createConversation supports multiple participants for a group conversation', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, ['Belle', 'Blake', 'Nathan']);
+    assert.deepEqual(conversation.participants, ['Belle', 'Blake', 'Nathan']);
+});
+
+test('findMostRecentThread matches conversations with the exact same participant set, regardless of order', () => {
+    const settings = { conversations: {} };
+    const c1 = createConversation(settings, ['Belle', 'Blake']);
+    c1.lastActive = 100;
+    const c2 = createConversation(settings, ['Blake', 'Belle']); // same people, different order
+    c2.lastActive = 200;
+    const found = findMostRecentThread(settings, ['Belle', 'Blake']);
+    assert.equal(found.id, c2.id);
+});
+
+test('findMostRecentThread does not match a conversation with a different participant set', () => {
+    const settings = { conversations: {} };
+    createConversation(settings, ['Belle', 'Blake']);
+    assert.equal(findMostRecentThread(settings, ['Belle']), undefined);
+});
+
+test('getThreadsFor lists only conversations with the exact same participant set', () => {
+    const settings = { conversations: {} };
+    const groupThread = createConversation(settings, ['Belle', 'Blake']);
+    createConversation(settings, ['Belle']);
+    const threads = getThreadsFor(settings, ['Belle', 'Blake']);
+    assert.equal(threads.length, 1);
+    assert.equal(threads[0].id, groupThread.id);
+});
+
+test('migrateParticipantsField converts a legacy charName-only conversation into participants: [charName]', () => {
+    const settings = { conversations: { conv_1: { id: 'conv_1', charName: 'Blake', messages: [], createdAt: 1, lastActive: 1 } } };
+    migrateParticipantsField(settings);
+    assert.deepEqual(settings.conversations.conv_1.participants, ['Blake']);
+    assert.equal('charName' in settings.conversations.conv_1, false);
+});
+
+test('migrateParticipantsField is a no-op for a conversation that already has participants', () => {
+    const settings = { conversations: { conv_1: { id: 'conv_1', participants: ['Belle', 'Blake'], messages: [], createdAt: 1, lastActive: 1 } } };
+    migrateParticipantsField(settings);
+    assert.deepEqual(settings.conversations.conv_1.participants, ['Belle', 'Blake']);
 });

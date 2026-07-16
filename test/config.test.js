@@ -29,7 +29,7 @@ test('getSettings migrates milestone-1-era conversations (keyed by charName, no 
     const settings = getSettings(extensionSettings);
     assert.equal(settings.conversations.Rosa, undefined);
     const migrated = Object.values(settings.conversations)[0];
-    assert.equal(migrated.charName, 'Rosa');
+    assert.deepEqual(migrated.participants, ['Rosa']);
     assert.deepEqual(migrated.messages, ['x']);
     assert.equal(migrated.lastActive, 123);
 });
