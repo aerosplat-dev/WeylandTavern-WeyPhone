@@ -747,10 +747,18 @@ function rerenderMemoryScreen() {
 async function generateMemory(conversationId, conversation, context, settings, options = {}) {
     const { silent = true, forcedWindow = null, replaceMemoryId = null } = options;
     if (memoryGeneratingConversationIds.has(conversationId)) return;
-    // Memory generation stays full-bot-only for this milestone (matches the brief's scope for
-    // Task 8 — only generateReply's solo-conversation path branches on hasFullBotEntry); a
-    // subbot-only conversation has no charPer.js/character-card entry, so resolveConversationCharacter
-    // correctly returns undefined and this bails out with no memory generated, same as before.
+    // Memory generation stays full-bot-solo-only for this milestone (matches Task 8's original
+    // scope — only generateReply's solo-conversation path branches on hasFullBotEntry). This used
+    // to rely entirely on resolveConversationCharacter/charPer.get returning nothing for a
+    // subbot-only conversation's first participant — which is correct for a PURE-subbot
+    // conversation, but silently wrong for a MIXED group whose first participant happens to be a
+    // full-bot character (e.g. participants: ["Belle", "Blake"]): resolveConversationCharacter
+    // would find Belle's real record and charPer.get would find her real config, so neither old
+    // guard fired, and a Belle+Blake group thread would get a memory framed entirely around
+    // Belle's persona alone, ignoring the group. Explicit length check makes the real boundary
+    // (groups don't get memory generation at all yet) correct regardless of which participant
+    // happens to be first or whether they have a full-bot.
+    if (conversation.participants.length > 1) return;
     const character = resolveConversationCharacter(context, conversation.participants[0]);
     if (!character) return;
     const personalityConfig = charPer.get(character.name);
