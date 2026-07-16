@@ -1645,7 +1645,12 @@ function showScreen(view) {
         title.textContent = 'Following';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         const portraitMap = buildTwitterPortraitMap(context, [...WEYLAND_ROSTER, ...TWITTER_ONLY_ROSTER].map(c => c.name));
-        renderTwitterFollowingScreen(screenBody, { roster: [...WEYLAND_ROSTER, ...TWITTER_ONLY_ROSTER, ...PSA_ACCOUNTS], portraitMap });
+        // Sorted alphabetically by display name across ALL categories combined (roster characters,
+        // non-student Twitter-only accounts, PSA/business accounts) — a real Twitter Following list
+        // has no notion of "category," so it shouldn't visually cluster into one here either.
+        const followingRoster = [...WEYLAND_ROSTER, ...TWITTER_ONLY_ROSTER, ...PSA_ACCOUNTS]
+            .sort((a, b) => a.name.localeCompare(b.name));
+        renderTwitterFollowingScreen(screenBody, { roster: followingRoster, portraitMap });
         return;
     }
 
