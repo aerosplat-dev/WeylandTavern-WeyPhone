@@ -1243,3 +1243,71 @@
     cursor: pointer;
     color: gold;
 }
+
+/* Group conversation avatar stack — a small "deck of cards" of 2-4 overlapping portraits, since a
+   group has no single weybooru avatar to show. Fans out into a left-justified row on hover. */
+.wp-avatar-stack {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+}
+
+.wp-avatar-stack-card {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+    transition: transform 0.15s ease-out, left 0.15s ease-out;
+    /* Later cards (higher --wp-stack-index) sit on top and rotate progressively more. */
+    transform: rotate(calc(var(--wp-stack-index) * 8deg));
+    z-index: calc(var(--wp-stack-index) + 1);
+}
+
+.wp-avatar-stack-card .wp-avatar {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+/* Fan out into a left-justified side-by-side row on hover — each card resets its rotation and
+   shifts right by its own index, so they no longer overlap. */
+.wp-avatar-stack:hover {
+    width: calc(18px * var(--wp-stack-count) + 10px);
+}
+
+.wp-avatar-stack:hover .wp-avatar-stack-card {
+    transform: rotate(0deg);
+    left: calc(var(--wp-stack-index) * 18px);
+}
+
+/* Group message rendering (iMessage-style): speaker name above the first message in a run,
+   avatar beside the last message in a run. */
+.wp-message-speaker-name {
+    font-size: 0.75em;
+    opacity: 0.7;
+    margin: 4px 0 2px 40px; /* aligns with text after the avatar slot's width, not above the avatar itself */
+}
+
+.wp-message-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.wp-message-avatar-slot {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+}
+
+.wp-message-avatar-slot .wp-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+}

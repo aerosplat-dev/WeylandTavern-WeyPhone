@@ -9,6 +9,7 @@ import { getFavoriteEntryNames, toggleFavorite } from './lib/favorites.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
+import { formatParticipantNames } from './lib/participants.js';
 import { parseReply, parseGroupReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
@@ -321,7 +322,9 @@ function rerenderConversationMessages() {
     const conversation = getConversation(settings, currentConversationId);
     if (!conversation) return;
     const isTyping = generatingConversationIds.has(currentConversationId);
-    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState());
+    const isGroup = conversation.participants.length > 1;
+    const groupPortraitMap = isGroup ? buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl) : {};
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState(), { isGroup, portraitMap: groupPortraitMap });
     updateRegenerateEnabled(conversation);
 }
 
@@ -335,10 +338,12 @@ function rerenderIfStillViewing(conversationId, messages) {
     const messagesEl = document.getElementById('wp-messages');
     if (!messagesEl) return;
     const isTyping = generatingConversationIds.has(conversationId);
-    renderMessages(messagesEl, messages, editingMessageIndex, isTyping, getSelectState());
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, conversationId);
+    const isGroup = Boolean(conversation) && conversation.participants.length > 1;
+    const groupPortraitMap = isGroup ? buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl) : {};
+    renderMessages(messagesEl, messages, editingMessageIndex, isTyping, getSelectState(), { isGroup, portraitMap: groupPortraitMap });
     if (conversation) updateRegenerateEnabled(conversation);
 }
 
@@ -365,8 +370,8 @@ function renderMessagesScreenNow(context, settings) {
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return;
     const summaries = withTypingState(getAllConversationSummaries(settings), generatingConversationIds);
-    const charNames = summaries.map(summary => summary.participants.join(', '));
-    const portraitMap = buildPortraitMap(context.characters, charNames, context.getThumbnailUrl);
+    const allParticipantNames = summaries.flatMap(summary => summary.participants);
+    const portraitMap = buildPortraitMap(context.characters, allParticipantNames, context.getThumbnailUrl);
     renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
 }
 
@@ -1568,12 +1573,11 @@ function showScreen(view) {
     }
 
     if (view === 'threads') {
-        title.textContent = `${(currentThreadsFilter ?? []).join(', ')} Threads`;
+        title.textContent = `${formatParticipantNames(currentThreadsFilter ?? [])} Threads`;
         const portraitMap = renderThreadsScreenNow(context, settings);
-        // Solo-only lookup as an interim baseline (currentThreadsFilter always has exactly one
-        // entry until Task 9 adds group conversations) — portraitMap is keyed by individual
-        // participant name, not the joined display string used for the title above.
-        renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap?.[currentThreadsFilter?.[0]]);
+        const threadParticipants = currentThreadsFilter ?? [];
+        const threadPortraits = threadParticipants.map(name => portraitMap?.[name]);
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), threadParticipants.length > 1 ? threadPortraits : threadPortraits[0]);
         return;
     }
 
@@ -1642,13 +1646,16 @@ function showScreen(view) {
         showScreen('messages');
         return;
     }
-    title.textContent = conversation.participants.join(', ');
+    title.textContent = formatParticipantNames(conversation.participants);
     const portraitMap = buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl);
-    renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[conversation.participants[0]]);
+    const conversationPortraits = conversation.participants.map(name => portraitMap[name]);
+    renderPanelAvatar(document.getElementById('wp-panel-avatar'), conversation.participants.length > 1 ? conversationPortraits : conversationPortraits[0]);
     renderConversationScreen(screenBody);
     editingMessageIndex = -1;
     const isTyping = generatingConversationIds.has(currentConversationId);
-    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState());
+    const isGroup = conversation.participants.length > 1;
+    const groupPortraitMap = isGroup ? portraitMap : {};
+    renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState(), { isGroup, portraitMap: groupPortraitMap });
     updateRegenerateEnabled(conversation);
     // Route the tethered checkbox's checked AND disabled state through the shared helper, so
     // entering the conversation view freshly re-verifies the disabled state against the
