@@ -130,8 +130,50 @@ test('buildCastRoster records fullName (for matching) separately from entryName 
         entryName: 'Professor Akiyama',
         macroKey: 'AK',
         hasFullBot: true,
+        hasSubbot: true,
         portraitFirstName: 'sayori',
     });
+});
+
+test('buildCastRoster marks every normally-discovered entry hasSubbot: true', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: { 'Belle Calloway': { bot: 'Belle' } },
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: ['Belle'],
+    });
+    assert.equal(roster[0].hasSubbot, true);
+});
+
+test('buildCastRoster appends manualFullBotOnlyNames as hasSubbot: false, macroKey: null entries', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: {},
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: ['Loona'],
+        manualFullBotOnlyNames: ['Loona', 'Kressa'],
+    });
+    const loona = roster.find(c => c.entryName === 'Loona');
+    const kressa = roster.find(c => c.entryName === 'Kressa');
+    assert.deepEqual(loona, {
+        fullName: 'Loona',
+        entryName: 'Loona',
+        macroKey: null,
+        hasFullBot: true,
+        hasSubbot: false,
+        portraitFirstName: 'loona',
+    });
+    assert.equal(kressa.hasFullBot, false);
+    assert.equal(kressa.hasSubbot, false);
+});
+
+test('buildCastRoster excludes a manualFullBotOnlyNames entry that is also explicitly excluded', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: {},
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: [],
+        manualFullBotOnlyNames: ['Loona'],
+        excludedEntryNames: ['Loona'],
+    });
+    assert.equal(roster.length, 0);
 });
 
 test('buildCastRoster excludes an explicitly-named entry regardless of everything else (Muse case)', () => {

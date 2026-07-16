@@ -4,8 +4,7 @@ import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonality
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor } from './lib/storage.js';
 import { buildSystemPrompt, buildGroupSystemPrompt, buildMessages, resolveProfileId, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
-import { createPanelMarkup, renderMessagesScreen, renderContactComposerScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen, setRegistrarToggleState } from './lib/panel.js';
-import { getFavoriteEntryNames, toggleFavorite } from './lib/favorites.js';
+import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen, setRegistrarToggleState } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
@@ -48,8 +47,8 @@ let currentConversationId = null;
 let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
 let currentTwitterProfileCharacter = null;
 let currentThreadsFilter = null; // participants string[] — set when entering the 'threads' view
-let contactComposerTags = []; // entryNames already tagged in the "To:" line
-let contactComposerQuery = ''; // raw untagged text currently in #wp-to-input
+let groupSelectionMode = false; // true while the New Message screen is in Group Chat multi-select mode
+let groupSelectionNames = []; // entryNames checked so far in group selection mode
 
 // Desktop-only per-view panel sizes the user has manually resized to, via the SAME drag handles
 // initPanelResize always used — recorded on drag-end (see endResize there), applied on entering
@@ -78,7 +77,7 @@ let castRosterPromise = null;
  * complete subbot/full-bot contact roster. Real I/O lives here; buildCastRoster itself (imported
  * above) is pure and independently unit-tested — see lib/castRoster.js.
  * @param {ReturnType<typeof SillyTavern.getContext>} context
- * @returns {Promise<Array<{fullName: string, entryName: string, macroKey: string, hasFullBot: boolean, portraitFirstName: string}>>}
+ * @returns {Promise<Array<{fullName: string, entryName: string, macroKey: string | null, hasFullBot: boolean, hasSubbot: boolean, portraitFirstName: string}>>}
  */
 async function fetchCastRoster(context) {
     const response = await fetch('https://cast.weybooru.com/data/data.json');
@@ -94,6 +93,13 @@ async function fetchCastRoster(context) {
         weylandEntries,
         charPerKeys: [...charPer.keys()],
         excludedEntryNames: EXCLUDED_CHARACTER_NAMES,
+        // Loona and Kressa have real full-bots (charPer.js) but are tagged "No Subbot" in
+        // weybooru's own data, so the normal discovery loop above never finds them. They're
+        // wanted back as ordinary 1-on-1 contacts (greyed out/unselectable in Group Chat mode,
+        // since they have no subbot content) — see the milestone-9-revision design spec. Aethel
+        // has the same "No Subbot" gap but is deliberately NOT included here per explicit
+        // direction (reserved for a different, unrelated future use elsewhere in the platform).
+        manualFullBotOnlyNames: ['Loona', 'Kressa'],
     });
 }
 
@@ -534,43 +540,21 @@ function runPhoneAppGeneration(appKey) {
     });
 }
 
-// Re-renders the "New Message" contact composer screen (Favorites + live-matched roster) against
-// the current in-memory tags/query state — guarded the same way as rerenderPhoneAppScreenIfVisible
-// (the user may navigate away, or the async getCastRoster() fetch may resolve, after this was
-// called from an event that's no longer relevant).
-//
-// renderContactComposerScreen replaces #wp-screen-body's ENTIRE innerHTML on every call, which
-// destroys and recreates #wp-to-input even though this runs on every keystroke (the 'input'
-// listener below calls this on every character typed). Removing a focused element from the DOM
-// blurs it, so without the explicit focus/caret restore here, typing more than one character would
-// silently stop reaching the input after the first re-render — confirmed live via Playwright
-// (typing "Nathan" character-by-character left only "N" in the field and no active element) before
-// this restore logic was added.
-async function rerenderContactComposerScreen() {
+// Re-renders the "New Message" contact list screen against the current in-memory group-selection
+// state — guarded the same way as rerenderPhoneAppScreenIfVisible (the user may navigate away, or
+// the async getCastRoster() fetch may resolve, after this was called from an event that's no
+// longer relevant).
+async function rerenderContactsScreen() {
     if (currentView !== 'contacts') return;
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return;
-    const context = SillyTavern.getContext();
-    const settings = getSettings(context.extensionSettings);
     const roster = await getCastRoster();
     if (currentView !== 'contacts') return; // user may have navigated away while awaiting the roster
-    const priorInput = document.getElementById('wp-to-input');
-    const hadFocus = !!priorInput && document.activeElement === priorInput;
-    const priorSelectionStart = hadFocus ? priorInput.selectionStart : null;
-    renderContactComposerScreen(screenBody, {
+    renderContactsScreen(screenBody, {
         roster,
-        favoriteEntryNames: getFavoriteEntryNames(settings),
-        query: contactComposerQuery,
-        tags: contactComposerTags,
+        groupMode: groupSelectionMode,
+        selectedEntryNames: groupSelectionNames,
     });
-    if (hadFocus) {
-        const newInput = document.getElementById('wp-to-input');
-        if (newInput) {
-            newInput.focus();
-            const caretPos = priorSelectionStart ?? newInput.value.length;
-            newInput.setSelectionRange(caretPos, caretPos);
-        }
-    }
 }
 
 // Re-renders the currently-visible phone-app screen if the user is actually looking at the app
@@ -1429,33 +1413,34 @@ function handleScreenBodyClick(event) {
         showScreen('conversation');
         return;
     }
-    const starButton = event.target.closest('.wp-contact-star');
-    if (starButton) {
-        const entryName = starButton.dataset.starFor;
-        const context = SillyTavern.getContext();
-        const settings = getSettings(context.extensionSettings);
-        toggleFavorite(settings, entryName);
-        context.saveSettingsDebounced();
-        rerenderContactComposerScreen();
+    if (event.target.id === 'wp-group-chat-button') {
+        groupSelectionMode = true;
+        groupSelectionNames = [];
+        rerenderContactsScreen();
         return;
     }
-    const contactCard = event.target.closest('.wp-contact-card');
-    if (contactCard && !event.target.closest('.wp-contact-star')) {
-        const entryName = contactCard.dataset.contactFor;
-        if (!contactComposerTags.includes(entryName)) contactComposerTags.push(entryName);
-        contactComposerQuery = '';
-        rerenderContactComposerScreen();
+    if (event.target.id === 'wp-group-cancel-button') {
+        groupSelectionMode = false;
+        groupSelectionNames = [];
+        rerenderContactsScreen();
         return;
     }
-    const tagRemoveButton = event.target.closest('.wp-to-tag-remove');
-    if (tagRemoveButton) {
-        const entryName = tagRemoveButton.dataset.tagRemoveFor;
-        contactComposerTags = contactComposerTags.filter(name => name !== entryName);
-        rerenderContactComposerScreen();
+    if (event.target.id === 'wp-group-done-button' && groupSelectionNames.length > 0) {
+        handleStartConversation([...groupSelectionNames]);
         return;
     }
-    if (event.target.id === 'wp-start-conversation-button' && contactComposerTags.length > 0) {
-        handleStartConversation([...contactComposerTags]);
+    const contactRow = event.target.closest('.wp-contact-row');
+    if (contactRow) {
+        const entryName = contactRow.dataset.contactFor;
+        if (!groupSelectionMode) {
+            handleStartConversation([entryName]);
+            return;
+        }
+        if (contactRow.classList.contains('wp-contact-row-disabled')) return;
+        groupSelectionNames = groupSelectionNames.includes(entryName)
+            ? groupSelectionNames.filter(name => name !== entryName)
+            : [...groupSelectionNames, entryName];
+        rerenderContactsScreen();
         return;
     }
     const editBtn = event.target.closest('.wp-message-edit-btn');
@@ -1629,9 +1614,9 @@ function showScreen(view) {
     if (view === 'contacts') {
         title.textContent = 'New Message';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
-        contactComposerTags = [];
-        contactComposerQuery = '';
-        rerenderContactComposerScreen();
+        groupSelectionMode = false;
+        groupSelectionNames = [];
+        rerenderContactsScreen();
         return;
     }
 
@@ -2047,28 +2032,6 @@ function initPanel() {
         if (event.key === 'Enter' && event.target.id === 'wp-input') {
             handleSend();
         }
-    });
-    screenBody.addEventListener('input', (event) => {
-        if (event.target.id !== 'wp-to-input') return;
-        contactComposerQuery = event.target.value;
-        rerenderContactComposerScreen();
-    });
-    // Auto-tags an exact full-name match on space/comma/Enter, so typing a whole name and
-    // continuing to type (rather than clicking the matched card) still commits the tag.
-    screenBody.addEventListener('keydown', (event) => {
-        if (event.target.id !== 'wp-to-input') return;
-        if (event.key !== ' ' && event.key !== ',' && event.key !== 'Enter') return;
-        const raw = event.target.value.trim();
-        if (!raw) return;
-        getCastRoster().then(roster => {
-            const exact = roster.find(c => c.fullName.toLowerCase() === raw.toLowerCase() && !contactComposerTags.includes(c.entryName));
-            if (exact) {
-                event.preventDefault();
-                contactComposerTags.push(exact.entryName);
-                contactComposerQuery = '';
-                rerenderContactComposerScreen();
-            }
-        });
     });
 }
 
