@@ -9,7 +9,7 @@ test('TEXTING_MODE_INSTRUCTIONS is a non-empty string', () => {
 });
 
 test('TEXTING_MODE_INSTRUCTIONS establishes the always-texting framing', () => {
-    assert.match(TEXTING_MODE_INSTRUCTIONS, /entire conversation/i);
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /entire world|entire conversation/i);
     assert.match(TEXTING_MODE_INSTRUCTIONS, /Date\/Time\/Location|scene header/i);
 });
 
@@ -32,4 +32,26 @@ test('TEXTING_MODE_INSTRUCTIONS instructs the model to infer voice from personal
 
 test('TEXTING_MODE_INSTRUCTIONS discourages narration in this context', () => {
     assert.match(TEXTING_MODE_INSTRUCTIONS, /narration/i);
+});
+
+test('TEXTING_MODE_INSTRUCTIONS overrides bracketed internal-thought instructions from the character\'s own prompt', () => {
+    // The platform's own master prompt tells the model "[Brackets] for character thoughts (if
+    // enabled)", and some per-character configs enable it — texting mode must explicitly override
+    // this, since nobody writes their internal thoughts as an actual text message.
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /\[Bracketed\]|\[brackets\]/i);
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /internal thoughts/i);
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /nobody writes/i);
+});
+
+test('TEXTING_MODE_INSTRUCTIONS instructs the model to actively judge this specific character\'s texting voice', () => {
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /how would THIS character actually text/);
+});
+
+test('TEXTING_MODE_INSTRUCTIONS discourages a default wall of back-to-back messages, with a dramatic-moment exception', () => {
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /wall of many messages/i);
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /panicking|furious|overjoyed/i);
+});
+
+test('TEXTING_MODE_INSTRUCTIONS frames the whole reply as the character\'s entire world, not just a channel within roleplay', () => {
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /entire world/i);
 });
