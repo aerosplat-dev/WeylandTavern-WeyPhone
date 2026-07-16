@@ -509,8 +509,17 @@ async function runFlavorAppGeneration({ trackingSet, trackingKey, rerender, buil
         // setting is ever unreadable, so this stays in lockstep with the user's own response-length
         // slider rather than drifting out of sync with a second hardcoded number.
         const maxTokens = context.chatCompletionSettings?.openai_max_tokens || DEFAULT_PHONE_APP_MAX_TOKENS;
+        // Same live-model override generateReply uses (see its own call site's comment for the full
+        // rationale): a Connection Profile's `model` field is a snapshot from whenever it was last
+        // saved, not whatever's actually live/selected in SillyTavern's main chat completion settings
+        // right now. Flavor apps are meant to track the live main-chat model exactly like Messages
+        // does — omitting this was a real bug (flavor-app generation silently sent a stale/possibly
+        // invalid saved model, causing provider-side request failures the Messages path never hit
+        // since it already had this override).
+        const liveModel = context.getChatCompletionModel?.();
+        const overridePayload = liveModel ? { model: liveModel } : undefined;
         const result = await sendMessage({
-            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, maxTokens),
+            sendRequest: (id, msgs) => context.ConnectionManagerRequestService.sendRequest(id, msgs, maxTokens, undefined, overridePayload),
             profileId,
             messages,
         });
