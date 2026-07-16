@@ -21,6 +21,7 @@ import { PSA_ACCOUNTS } from './lib/twitterPrompts.js';
 import { WEYLAND_ROSTER } from './lib/weylandRoster.js';
 import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 import { buildCastRoster } from './lib/castRoster.js';
+import { resolveSubbotPersonality } from './lib/subbotContent.js';
 // Root-relative (leading "/"), NOT relative to this file's own location — quick-reply-ext is a
 // bundled core-adjacent extension that always lives at this fixed, SillyTavern-convention-dictated
 // URL (public/scripts/extensions/quick-reply-ext/), regardless of where WeyPhone itself is
@@ -45,7 +46,7 @@ let currentView = 'home';
 let currentConversationId = null;
 let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
 let currentTwitterProfileCharacter = null;
-let currentThreadsFilter = null; // charName string — set when entering the 'threads' view
+let currentThreadsFilter = null; // participants string[] — set when entering the 'threads' view
 let contactComposerTags = []; // entryNames already tagged in the "To:" line
 let contactComposerQuery = ''; // raw untagged text currently in #wp-to-input
 
@@ -154,6 +155,43 @@ const DEFAULT_MEMORY_MAX_TOKENS = 256;
  */
 function resolveConversationCharacter(context, charName) {
     return context.characters.find(c => c.name === charName);
+}
+
+/**
+ * True if entryName has a real charPer.js entry (i.e. is eligible for the full-bot generation
+ * path) — used to decide, for a SOLO conversation only, whether to use resolveCharacterPrompt's
+ * existing full-bot path or the new subbot path below. Group conversations never call this; they
+ * always use the subbot path for every participant (see Task 9).
+ * @param {string} entryName
+ * @returns {boolean}
+ */
+function hasFullBotEntry(entryName) {
+    return charPer.has(entryName);
+}
+
+/**
+ * Builds the same {systemPrompt, postHistory, personalityText, descriptionText} shape
+ * resolveCharacterPrompt produces, but sourced from the subbot content pipeline
+ * (lib/subbotContent.js reading quick-reply-ext/src/strings.js) instead of charPer.js/a real
+ * character card — used for any conversation participant with no full-bot entry. `macroKey` comes
+ * from the cast roster entry matched during discovery (lib/castRoster.js).
+ * @param {ReturnType<typeof SillyTavern.getContext>} context
+ * @param {string} macroKey
+ * @returns {Promise<{systemPrompt: string, postHistory: string, personalityText: string, descriptionText: string}>}
+ */
+async function resolveSubbotPrompt(context, macroKey) {
+    const promptChoice = context.variables.global.get('PromptChoice') || 'Current Prompt';
+    const ravEntry = resolveMasterPrompt(ravs, promptChoice);
+    const htmlEnabled = context.variables.global.get('HTML!') === 'Enabled';
+    const rpFocus = context.variables.global.get('RPFocus') || '';
+    const postHistory = resolvePostHistoryInstructions(ravEntry, { htmlEnabled, rpFocus });
+    const personalityText = resolveSubbotPersonality(strings, macroKey);
+    return {
+        systemPrompt: ravEntry.teg,
+        postHistory,
+        personalityText,
+        descriptionText: '',
+    };
 }
 
 function log(...args) {
@@ -327,7 +365,7 @@ function renderMessagesScreenNow(context, settings) {
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return;
     const summaries = withTypingState(getAllConversationSummaries(settings), generatingConversationIds);
-    const charNames = summaries.map(summary => summary.charName);
+    const charNames = summaries.map(summary => summary.participants.join(', '));
     const portraitMap = buildPortraitMap(context.characters, charNames, context.getThumbnailUrl);
     renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
 }
@@ -338,8 +376,8 @@ function renderMessagesScreenNow(context, settings) {
 function renderThreadsScreenNow(context, settings) {
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return null;
-    const summaries = withTypingState(getThreadsFor(settings, currentThreadsFilter ?? ''), generatingConversationIds);
-    const portraitMap = buildPortraitMap(context.characters, [currentThreadsFilter ?? ''], context.getThumbnailUrl);
+    const summaries = withTypingState(getThreadsFor(settings, currentThreadsFilter ?? []), generatingConversationIds);
+    const portraitMap = buildPortraitMap(context.characters, currentThreadsFilter ?? [], context.getThumbnailUrl);
     renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
     return portraitMap;
 }
@@ -704,7 +742,11 @@ function rerenderMemoryScreen() {
 async function generateMemory(conversationId, conversation, context, settings, options = {}) {
     const { silent = true, forcedWindow = null, replaceMemoryId = null } = options;
     if (memoryGeneratingConversationIds.has(conversationId)) return;
-    const character = resolveConversationCharacter(context, conversation.charName);
+    // Memory generation stays full-bot-only for this milestone (matches the brief's scope for
+    // Task 8 — only generateReply's solo-conversation path branches on hasFullBotEntry); a
+    // subbot-only conversation has no charPer.js/character-card entry, so resolveConversationCharacter
+    // correctly returns undefined and this bails out with no memory generated, same as before.
+    const character = resolveConversationCharacter(context, conversation.participants[0]);
     if (!character) return;
     const personalityConfig = charPer.get(character.name);
     if (!personalityConfig) return;
@@ -777,11 +819,7 @@ async function generateMemory(conversationId, conversation, context, settings, o
 // prompt, builds the request (including the always-texting instructions, phone-format history,
 // and any pinned memories), sends it, and stores each extracted message from the reply.
 async function generateReply(conversationId, conversation, context, settings) {
-    const character = resolveConversationCharacter(context, conversation.charName);
-    if (!character) {
-        toastr.error(`Could not find character "${conversation.charName}" for this conversation.`, 'WeyPhone');
-        return;
-    }
+    const entryName = conversation.participants[0]; // solo conversation: exactly one participant
 
     // generatingConversationIds.add()/refreshVisibleScreen() MUST stay inside this try block —
     // placing them before `try` has leaked a permanently-stuck "generating" conversation twice
@@ -791,7 +829,23 @@ async function generateReply(conversationId, conversation, context, settings) {
     try {
         generatingConversationIds.add(conversationId);
         refreshVisibleScreen();
-        const resolved = await resolveCharacterPrompt(context, character);
+        let resolved;
+        if (hasFullBotEntry(entryName)) {
+            const character = resolveConversationCharacter(context, entryName);
+            if (!character) {
+                toastr.error(`Could not find character "${entryName}" for this conversation.`, 'WeyPhone');
+                return;
+            }
+            resolved = await resolveCharacterPrompt(context, character);
+        } else {
+            const roster = await getCastRoster();
+            const rosterEntry = roster.find(c => c.entryName === entryName);
+            if (!rosterEntry) {
+                toastr.error(`Could not find subbot data for "${entryName}".`, 'WeyPhone');
+                return;
+            }
+            resolved = await resolveSubbotPrompt(context, rosterEntry.macroKey);
+        }
         // Memories are purely additive, matching the real platform's own Weyland-LTM behavior
         // (confirmed by reading its demoteExcessLTMs: pin/unpin only toggles a World Info entry's
         // constant/vectorized flags, it never touches the chat array) — raw history is never
@@ -835,11 +889,11 @@ async function generateReply(conversationId, conversation, context, settings) {
             substituteParams: context.substituteParams,
             content: fullSystemPromptText,
             userName,
-            charName: character.name,
+            charName: entryName,
         });
         const lastMessage = conversation.messages[conversation.messages.length - 1];
-        const reconstructedHistory = reconstructHistoryAsPhoneFormat(historyForScan, { charName: character.name, userName }, formatClockTime);
-        const wrappedUserMessage = reconstructHistoryAsPhoneFormat([lastMessage], { charName: character.name, userName }, formatClockTime)[0].content;
+        const reconstructedHistory = reconstructHistoryAsPhoneFormat(historyForScan, { charName: entryName, userName }, formatClockTime);
+        const wrappedUserMessage = reconstructHistoryAsPhoneFormat([lastMessage], { charName: entryName, userName }, formatClockTime)[0].content;
 
         const messages = buildMessages({
             systemPromptText: substitutedSystemPromptText,
@@ -1063,16 +1117,16 @@ function handleDeleteMemory(memoryId) {
     rerenderMemoryScreen();
 }
 
-function handleStartConversation(charName) {
+function handleStartConversation(participants) {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
-    const conversation = createConversation(settings, charName);
+    const conversation = createConversation(settings, participants);
     context.saveSettingsDebounced();
     currentConversationId = conversation.id;
     showScreen('conversation');
 }
 
-// "Start New Thread" — creates a fresh conversation with the SAME character as the one currently
+// "Start New Thread" — creates a fresh conversation with the SAME participants as the one currently
 // open, WITHOUT touching the existing thread's messages at all (createConversation always makes a
 // brand-new record; nothing here deletes or modifies the current conversation).
 function handleStartNewThread() {
@@ -1080,7 +1134,7 @@ function handleStartNewThread() {
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, currentConversationId);
     if (!conversation) return;
-    const newConversation = createConversation(settings, conversation.charName);
+    const newConversation = createConversation(settings, conversation.participants);
     context.saveSettingsDebounced();
     currentConversationId = newConversation.id;
     showScreen('conversation');
@@ -1094,7 +1148,7 @@ function handleSwitchThreads() {
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, currentConversationId);
     if (!conversation) return;
-    currentThreadsFilter = conversation.charName;
+    currentThreadsFilter = conversation.participants;
     showScreen('threads');
 }
 
@@ -1107,7 +1161,7 @@ function handleDeleteConversation(id) {
         currentConversationId = null;
     }
     if (currentView === 'threads') {
-        const remaining = getThreadsFor(settings, currentThreadsFilter ?? '');
+        const remaining = getThreadsFor(settings, currentThreadsFilter ?? []);
         showScreen(remaining.length === 0 ? 'messages' : 'threads');
         return;
     }
@@ -1452,9 +1506,12 @@ function showScreen(view) {
     }
 
     if (view === 'threads') {
-        title.textContent = `${currentThreadsFilter ?? ''} Threads`;
+        title.textContent = `${(currentThreadsFilter ?? []).join(', ')} Threads`;
         const portraitMap = renderThreadsScreenNow(context, settings);
-        renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap?.[currentThreadsFilter]);
+        // Solo-only lookup as an interim baseline (currentThreadsFilter always has exactly one
+        // entry until Task 9 adds group conversations) — portraitMap is keyed by individual
+        // participant name, not the joined display string used for the title above.
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap?.[currentThreadsFilter?.[0]]);
         return;
     }
 
@@ -1511,8 +1568,8 @@ function showScreen(view) {
             return;
         }
         title.textContent = 'Memory';
-        const portraitMap = buildPortraitMap(context.characters, [conversation.charName], context.getThumbnailUrl);
-        renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[conversation.charName]);
+        const portraitMap = buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl);
+        renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[conversation.participants[0]]);
         rerenderMemoryScreen();
         return;
     }
@@ -1523,9 +1580,9 @@ function showScreen(view) {
         showScreen('messages');
         return;
     }
-    title.textContent = conversation.charName;
-    const portraitMap = buildPortraitMap(context.characters, [conversation.charName], context.getThumbnailUrl);
-    renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[conversation.charName]);
+    title.textContent = conversation.participants.join(', ');
+    const portraitMap = buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl);
+    renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[conversation.participants[0]]);
     renderConversationScreen(screenBody);
     editingMessageIndex = -1;
     const isTyping = generatingConversationIds.has(currentConversationId);
