@@ -47,9 +47,14 @@ test('TEXTING_MODE_INSTRUCTIONS instructs the model to actively judge this speci
     assert.match(TEXTING_MODE_INSTRUCTIONS, /how would THIS character actually text/);
 });
 
-test('TEXTING_MODE_INSTRUCTIONS discourages a default wall of back-to-back messages, with a dramatic-moment exception', () => {
-    assert.match(TEXTING_MODE_INSTRUCTIONS, /wall of many messages/i);
-    assert.match(TEXTING_MODE_INSTRUCTIONS, /panicking|furious|overjoyed/i);
+test('TEXTING_MODE_INSTRUCTIONS discourages verbose back-to-back messages, framing a burst as an elevated-emotion signal', () => {
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /verbose back-to-back messages/i);
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /panic|fury|overjoyed/i);
+});
+
+test('TEXTING_MODE_INSTRUCTIONS instructs each message in an earned burst to get shorter, not longer, as it goes', () => {
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /SHORTER as it goes/);
+    assert.match(TEXTING_MODE_INSTRUCTIONS, /never a string of full,? polished sentences/i);
 });
 
 test('TEXTING_MODE_INSTRUCTIONS frames the whole reply as the character\'s entire world, not just a channel within roleplay', () => {
