@@ -1957,6 +1957,15 @@ function initPanel() {
             showScreen('twitter-feed');
         } else if (currentView === 'twitter-profile') {
             showScreen('twitter-following');
+        } else if (currentView === 'contacts' || currentView === 'conversation') {
+            // Both "New Message" (contacts) and an open chat always return to the top-level Messages
+            // overview — simplest, most predictable target, and matches the existing precedent
+            // elsewhere in showScreen (e.g. `if (!conversation) { showScreen('messages'); return; }`
+            // for a conversation that no longer exists). There's no "which screen did the user
+            // actually arrive from" tracking in this codebase today (e.g. threads vs. messages), so
+            // this doesn't attempt to reconstruct that — it's a deliberate simplification, not an
+            // oversight.
+            showScreen('messages');
         } else {
             showScreen('conversation');
         }

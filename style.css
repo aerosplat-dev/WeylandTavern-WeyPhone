@@ -197,7 +197,9 @@
 #wp-panel[data-view="memory"] #wp-back-button,
 #wp-panel[data-view="twitter-following"] #wp-back-button,
 #wp-panel[data-view="twitter-profile"] #wp-back-button,
-#wp-panel[data-view="threads"] #wp-back-button {
+#wp-panel[data-view="threads"] #wp-back-button,
+#wp-panel[data-view="contacts"] #wp-back-button,
+#wp-panel[data-view="conversation"] #wp-back-button {
     display: flex;
 }
 
