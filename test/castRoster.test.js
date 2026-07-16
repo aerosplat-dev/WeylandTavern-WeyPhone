@@ -156,3 +156,30 @@ test('buildCastRoster omits a character with no lorebook title match at all (Mr.
 test('buildCastRoster returns an empty array for an empty weybooru character set', () => {
     assert.deepEqual(buildCastRoster({ weybooruCharacters: {}, weylandEntries: WEYLAND_ENTRIES_FIXTURE, charPerKeys: [] }), []);
 });
+
+test('findEntryTitleMatch prefers an exact title match over an ambiguous substring match (real Belle/"Belle & Dash Room" case)', () => {
+    const entries = [
+        { comment: 'Belle', content: '{{getvar::BE}}' },
+        { comment: 'Belle & Dash Room', content: '[BELLE & DASH ROOM]\nSome room description text, not a getvar macro.' },
+    ];
+    assert.deepEqual(findEntryTitleMatch(['Belle', 'Calloway'], entries), { entryName: 'Belle', macroKey: 'BE' });
+});
+
+test('findEntryTitleMatch still treats genuinely ambiguous matches (no exact match among them) as ambiguous', () => {
+    const entries = [
+        { comment: 'Adrian Sullivan', content: '{{getvar::AN}}' },
+        { comment: 'Mason Sullivan', content: '{{getvar::MS}}' },
+    ];
+    // Neither entry is titled exactly "Sullivan" -- this must remain unresolved, same as before the fix.
+    assert.equal(findEntryTitleMatch(['Sullivan'], entries), null);
+});
+
+test('findEntryTitleMatch handles multiple real-world companion entries (4-way ambiguity, Ava case)', () => {
+    const entries = [
+        { comment: 'Ava', content: '{{getvar::AV}}' },
+        { comment: 'Ava Room', content: 'Some room text, not a macro.' },
+        { comment: 'Kemetic Caravan', content: 'Unrelated caravan text mentioning ava in passing.' },
+        { comment: 'Caravan Roster', content: 'Also unrelated.' },
+    ];
+    assert.deepEqual(findEntryTitleMatch(['Ava'], entries), { entryName: 'Ava', macroKey: 'AV' });
+});
