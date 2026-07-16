@@ -74,7 +74,7 @@ test('parseGroupReply extracts each Incoming line with its own speaker name', ()
 });
 
 test('parseGroupReply does NOT mistake an Incoming-shaped line inside the analysis block for a real message (phantom-message regression guard)', () => {
-    const raw = '<analysis>Nathan should say something like Incoming¦3:47 PM¦Nathan¦fake, but only in the real reply below</analysis>\nIncoming¦3:50 PM¦Nathan¦the real one';
+    const raw = '<analysis>\nNathan should say something like:\nIncoming¦3:47 PM¦Nathan¦fake\nbut only in the real reply below\n</analysis>\nIncoming¦3:50 PM¦Nathan¦the real one';
     assert.deepEqual(parseGroupReply(raw), {
         messages: [{ speaker: 'Nathan', content: 'the real one' }],
         usedFallback: false,
