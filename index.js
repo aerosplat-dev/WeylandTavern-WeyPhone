@@ -47,8 +47,9 @@ let currentConversationId = null;
 let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
 let currentTwitterProfileCharacter = null;
 let currentThreadsFilter = null; // participants string[] — set when entering the 'threads' view
-let groupSelectionMode = false; // true while the New Message screen is in Group Chat multi-select mode
+let groupSelectionMode = false; // true while the New Message screen is in group-selection mode
 let groupSelectionNames = []; // entryNames checked so far in group selection mode
+let contactSearchQuery = ''; // raw text currently in #wp-contact-search-input
 
 // Desktop-only per-view panel sizes the user has manually resized to, via the SAME drag handles
 // initPanelResize always used — recorded on drag-end (see endResize there), applied on entering
@@ -551,20 +552,39 @@ function runPhoneAppGeneration(appKey) {
 }
 
 // Re-renders the "New Message" contact list screen against the current in-memory group-selection
-// state — guarded the same way as rerenderPhoneAppScreenIfVisible (the user may navigate away, or
-// the async getCastRoster() fetch may resolve, after this was called from an event that's no
-// longer relevant).
+// and search state — guarded the same way as rerenderPhoneAppScreenIfVisible (the user may
+// navigate away, or the async getCastRoster() fetch may resolve, after this was called from an
+// event that's no longer relevant).
+//
+// renderContactsScreen replaces #wp-screen-body's ENTIRE innerHTML on every call, which destroys
+// and recreates #wp-contact-search-input even though this runs on every keystroke (the 'input'
+// listener below calls this on every character typed). Removing a focused element from the DOM
+// blurs it, so without the explicit focus/caret restore here, typing more than one character would
+// silently stop reaching the input after the first re-render — same class of bug as the old tag
+// composer's #wp-to-input had (see this file's git history), fixed the same way here.
 async function rerenderContactsScreen() {
     if (currentView !== 'contacts') return;
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return;
     const roster = await getCastRoster();
     if (currentView !== 'contacts') return; // user may have navigated away while awaiting the roster
+    const priorInput = document.getElementById('wp-contact-search-input');
+    const hadFocus = !!priorInput && document.activeElement === priorInput;
+    const priorSelectionStart = hadFocus ? priorInput.selectionStart : null;
     renderContactsScreen(screenBody, {
         roster,
         groupMode: groupSelectionMode,
         selectedEntryNames: groupSelectionNames,
+        searchQuery: contactSearchQuery,
     });
+    if (hadFocus) {
+        const newInput = document.getElementById('wp-contact-search-input');
+        if (newInput) {
+            newInput.focus();
+            const caretPos = priorSelectionStart ?? newInput.value.length;
+            newInput.setSelectionRange(caretPos, caretPos);
+        }
+    }
 }
 
 // Re-renders the currently-visible phone-app screen if the user is actually looking at the app
@@ -1423,19 +1443,13 @@ function handleScreenBodyClick(event) {
         showScreen('conversation');
         return;
     }
-    if (event.target.id === 'wp-group-chat-button') {
-        groupSelectionMode = true;
+    if (event.target.closest('#wp-group-toggle-button')) {
+        groupSelectionMode = !groupSelectionMode;
         groupSelectionNames = [];
         rerenderContactsScreen();
         return;
     }
-    if (event.target.id === 'wp-group-cancel-button') {
-        groupSelectionMode = false;
-        groupSelectionNames = [];
-        rerenderContactsScreen();
-        return;
-    }
-    if (event.target.id === 'wp-group-done-button' && groupSelectionNames.length > 0) {
+    if (event.target.closest('#wp-group-send-button') && groupSelectionNames.length > 0) {
         handleStartConversation([...groupSelectionNames]);
         return;
     }
@@ -1626,6 +1640,7 @@ function showScreen(view) {
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         groupSelectionMode = false;
         groupSelectionNames = [];
+        contactSearchQuery = '';
         rerenderContactsScreen();
         return;
     }
@@ -2042,6 +2057,11 @@ function initPanel() {
         if (event.key === 'Enter' && event.target.id === 'wp-input') {
             handleSend();
         }
+    });
+    screenBody.addEventListener('input', (event) => {
+        if (event.target.id !== 'wp-contact-search-input') return;
+        contactSearchQuery = event.target.value;
+        rerenderContactsScreen();
     });
 }
 

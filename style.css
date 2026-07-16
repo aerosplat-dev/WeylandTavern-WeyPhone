@@ -1163,10 +1163,47 @@
 
 #wp-contacts-header {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
     gap: 6px;
-    padding: 8px;
+    padding: 5px 8px;
     border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.wp-contacts-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--SmartThemeChatTintColor, #2a2a2a);
+    color: var(--SmartThemeBodyColor, #fff);
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.wp-contacts-icon-btn.wp-active {
+    background: var(--SmartThemeQuoteColor);
+}
+
+.wp-contacts-icon-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+}
+
+#wp-contact-search-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    border-radius: 10px;
+    background: var(--SmartThemeChatTintColor, #2a2a2a);
+    color: var(--SmartThemeBodyColor, #fff);
+    padding: 5px 10px;
+    outline: none;
 }
 
 #wp-contact-list {
