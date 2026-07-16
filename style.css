@@ -782,6 +782,21 @@
     gap: 6px;
 }
 
+/* When nested inside .wp-message-row (the default, non-select/non-editing render path — see
+   renderMessages), the bubble's OWN max-width:80% resolves against .wp-message-row's own
+   intrinsic/auto width rather than #wp-messages's, which is an indeterminate/circular percentage
+   context that some engines resolve to a wider phantom size than the bubble's actual rendered
+   (word-wrapped) content — leaving dead space between the bubble and the .wp-message-item edge
+   it's aligned against (visible as e.g. a user bubble sitting oddly offset from the right edge,
+   as if reserving room for an avatar it doesn't have). .wp-message-item's own max-width:80% is
+   the single authoritative cap in the nested case (it resolves cleanly, being a direct flex child
+   of #wp-messages), so the nested bubble itself is left unconstrained here on purpose. The base
+   rule above still applies as-is to a bubble that's a DIRECT child of #wp-messages (the typing
+   indicator, and select-mode/editing-mode bubbles, none of which go through .wp-message-row). */
+.wp-message-row > .wp-message {
+    max-width: none;
+}
+
 .wp-message-text {
     flex: 1;
     min-width: 0;
