@@ -18,7 +18,7 @@ import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
 import { parsePhoneAppOutput } from './lib/phoneAppFormatting.js';
 import { parseTwitterPosts } from './lib/twitterParsing.js';
 import { PSA_ACCOUNTS } from './lib/twitterPrompts.js';
-import { WEYLAND_ROSTER } from './lib/weylandRoster.js';
+import { WEYLAND_ROSTER, TWITTER_ONLY_ROSTER } from './lib/weylandRoster.js';
 import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 import { buildCastRoster } from './lib/castRoster.js';
 import { resolveSubbotPersonality } from './lib/subbotContent.js';
@@ -634,11 +634,12 @@ function twitterCacheKey(mode, characterName) {
 
 const twitterGeneratingKeys = new Set();
 
-// A Twitter profile's subject is either a roster character (Following list) or a PSA/business
-// account (also on the Following list, as of the PSA-profile feature) — both are just {name,
-// handle, ...} objects, so one name-keyed lookup across both lists covers either case.
+// A Twitter profile's subject is a roster character, a TWITTER_ONLY_ROSTER character (non-student
+// accounts — see that array's own docstring for why they're kept separate from WEYLAND_ROSTER), or
+// a PSA/business account (also on the Following list, as of the PSA-profile feature) — all are just
+// {name, handle, ...} objects, so one name-keyed lookup across all three covers every case.
 function findTwitterProfileSubject(name) {
-    return WEYLAND_ROSTER.find(c => c.name === name) ?? PSA_ACCOUNTS.find(a => a.name === name);
+    return WEYLAND_ROSTER.find(c => c.name === name) ?? TWITTER_ONLY_ROSTER.find(c => c.name === name) ?? PSA_ACCOUNTS.find(a => a.name === name);
 }
 
 // Every PSA/business account portrait is a fixed local asset (see lib/portraits.js's
@@ -677,7 +678,7 @@ function runTwitterGeneration(mode, subjectName) {
             return buildTwitterPrompt({ mode: 'feed' });
         },
         parse: (rawText) => {
-            const parsed = parseTwitterPosts(rawText, { roster: WEYLAND_ROSTER, psaAccounts: PSA_ACCOUNTS });
+            const parsed = parseTwitterPosts(rawText, { roster: [...WEYLAND_ROSTER, ...TWITTER_ONLY_ROSTER], psaAccounts: PSA_ACCOUNTS });
             return { content: parsed, usable: parsed.posts.length > 0 };
         },
         errorLabel: 'Twitter generation failed',
@@ -1643,8 +1644,8 @@ function showScreen(view) {
     if (view === 'twitter-following') {
         title.textContent = 'Following';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
-        const portraitMap = buildTwitterPortraitMap(context, WEYLAND_ROSTER.map(c => c.name));
-        renderTwitterFollowingScreen(screenBody, { roster: [...WEYLAND_ROSTER, ...PSA_ACCOUNTS], portraitMap });
+        const portraitMap = buildTwitterPortraitMap(context, [...WEYLAND_ROSTER, ...TWITTER_ONLY_ROSTER].map(c => c.name));
+        renderTwitterFollowingScreen(screenBody, { roster: [...WEYLAND_ROSTER, ...TWITTER_ONLY_ROSTER, ...PSA_ACCOUNTS], portraitMap });
         return;
     }
 

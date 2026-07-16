@@ -44,6 +44,14 @@ test('buildTwitterPrompt feed mode includes the full roster and PSA accounts, in
     assert.ok(prompt.includes('Weyland Dining Services [@WeylandDining] — the university office that runs the Brodlak and Kyomi dining halls'));
 });
 
+test('buildTwitterPrompt feed mode includes the non-student TWITTER_ONLY_ROSTER accounts under their own heading', () => {
+    const prompt = buildTwitterPrompt({ mode: 'feed' });
+    assert.ok(prompt.includes('Navine [@unschoolingjourney_navine]'));
+    assert.ok(prompt.includes('Bastet [@RoyalBastet]'));
+    assert.match(prompt, /OTHER NOTABLE ACCOUNTS.*NOT Weyland students/);
+    assert.doesNotMatch(prompt, /Yik Yak|Discord|Chronicle/);
+});
+
 // Regression test: {{random::2::3::4}} must appear exactly once in the feed prompt. ST's macro
 // engine resolves each occurrence of {{random::...}} independently — writing it a second time
 // (e.g. in a header restating the count) would risk two DIFFERENT numbers in one prompt, an

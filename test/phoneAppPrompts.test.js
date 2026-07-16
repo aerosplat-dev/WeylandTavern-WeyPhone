@@ -18,6 +18,14 @@ test('PHONE_APP_PROMPTS.yikyak is a non-empty string', () => {
     assert.ok(PHONE_APP_PROMPTS.yikyak.trim().length > 0);
 });
 
+// Regression coverage for TWITTER_ONLY_ROSTER's whole reason for existing: Navine and Bastet are
+// NOT Weyland students, so they must never appear in the campus-bound Discord/Yik Yak prompts —
+// only lib/twitterPrompts.js should ever reference TWITTER_ONLY_ROSTER.
+test('PHONE_APP_PROMPTS.discord and .yikyak never mention the non-student TWITTER_ONLY_ROSTER accounts', () => {
+    assert.doesNotMatch(PHONE_APP_PROMPTS.discord, /unschoolingjourney_navine|RoyalBastet/);
+    assert.doesNotMatch(PHONE_APP_PROMPTS.yikyak, /unschoolingjourney_navine|RoyalBastet/);
+});
+
 test('all three prompts carry the special-generation framing marker', () => {
     for (const key of ['chronicle', 'discord', 'yikyak']) {
         assert.match(PHONE_APP_PROMPTS[key], /\[SPECIAL GENERATION/);
