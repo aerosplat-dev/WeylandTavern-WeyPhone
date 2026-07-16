@@ -226,6 +226,19 @@ test('buildCastRoster returns an empty array for an empty weybooru character set
     assert.deepEqual(buildCastRoster({ weybooruCharacters: {}, weylandEntries: WEYLAND_ENTRIES_FIXTURE, charPerKeys: [] }), []);
 });
 
+test('buildCastRoster sorts the whole roster alphabetically by fullName, including manualFullBotOnlyNames entries interleaved in place', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: {
+            'Nathan Ashford': { bot: 'Side Character' },
+            'Belle Calloway': { bot: 'Belle' },
+        },
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: [],
+        manualFullBotOnlyNames: ['Loona', 'Kressa'],
+    });
+    assert.deepEqual(roster.map(c => c.fullName), ['Belle Calloway', 'Kressa', 'Loona', 'Nathan Ashford']);
+});
+
 test('findEntryTitleMatch prefers an exact title match over an ambiguous substring match (real Belle/"Belle & Dash Room" case)', () => {
     const entries = [
         { comment: 'Belle', content: '{{getvar::BE}}' },
