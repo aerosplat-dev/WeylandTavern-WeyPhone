@@ -1,5 +1,5 @@
 import { MODULE_NAME, getSettings } from './lib/config.js';
-import { EXCLUDED_CHARACTER_NAMES, getSelectableCharacters } from './lib/characters.js';
+import { EXCLUDED_CHARACTER_NAMES } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
 import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor } from './lib/storage.js';
@@ -19,6 +19,7 @@ import { parseTwitterPosts } from './lib/twitterParsing.js';
 import { PSA_ACCOUNTS } from './lib/twitterPrompts.js';
 import { WEYLAND_ROSTER } from './lib/weylandRoster.js';
 import { buildTwitterPrompt } from './lib/twitterPrompts.js';
+import { buildCastRoster } from './lib/castRoster.js';
 // Root-relative (leading "/"), NOT relative to this file's own location — quick-reply-ext is a
 // bundled core-adjacent extension that always lives at this fixed, SillyTavern-convention-dictated
 // URL (public/scripts/extensions/quick-reply-ext/), regardless of where WeyPhone itself is
@@ -31,6 +32,10 @@ import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 // browser-only absolute path is safe here.
 import { ravs } from '/scripts/extensions/quick-reply-ext/src/rav.js';
 import { charPer } from '/scripts/extensions/quick-reply-ext/src/charper.js';
+// Not yet consumed by this task's own code — imported here per the Task 6 brief as the real
+// (non-mirror) subbot content source a later task (7/8) will read from when rendering an actual
+// subbot conversation. Kept as a plain import for now rather than adding a currently-dead call site.
+import strings from '/scripts/extensions/quick-reply-ext/src/strings.js';
 
 // One of the 11 data-view values showScreen() sets on #wp-panel:
 // 'home' | 'contacts' | 'conversation' | 'memory' | 'messages' | 'threads' | 'phone-app' |
@@ -54,6 +59,55 @@ const HOME_PANEL_SIZE = { width: 360, height: 466 };
 
 const PHONE_APP_LABELS = { chronicle: 'The Chronicle', discord: 'Discord', yikyak: 'Yik Yak' };
 const phoneAppGeneratingIds = new Set(); // tracks which app keys currently have a generation in flight
+
+// Cast roster discovery runs once per browser session (see the jQuery(async () => {...}) init
+// block at the bottom of this file) — cached here so every later call (opening "New Message",
+// composing a group) reuses the same in-memory result rather than re-fetching/re-scanning.
+// A Promise (not a plain array) so callers that run before the initial fetch resolves still get
+// the real result once it's ready, instead of racing ahead with an empty list.
+let castRosterPromise = null;
+
+/**
+ * Fetches cast.weybooru.com's live character catalog and cross-references it against the Weyland
+ * lorebook (via context.loadWorldInfo) and charPer.js (already imported in this file) to build the
+ * complete subbot/full-bot contact roster. Real I/O lives here; buildCastRoster itself (imported
+ * above) is pure and independently unit-tested — see lib/castRoster.js.
+ * @param {ReturnType<typeof SillyTavern.getContext>} context
+ * @returns {Promise<Array<{fullName: string, entryName: string, macroKey: string, hasFullBot: boolean, portraitFirstName: string}>>}
+ */
+async function fetchCastRoster(context) {
+    const response = await fetch('https://cast.weybooru.com/data/data.json');
+    const data = await response.json();
+    const characterEntry = (data.values || []).find(([key]) => key === 'character');
+    const weybooruCharacters = characterEntry ? characterEntry[1] : {};
+
+    const weylandBook = await context.loadWorldInfo('Weyland');
+    const weylandEntries = weylandBook && weylandBook.entries ? Object.values(weylandBook.entries) : [];
+
+    return buildCastRoster({
+        weybooruCharacters,
+        weylandEntries,
+        charPerKeys: [...charPer.keys()],
+        excludedEntryNames: EXCLUDED_CHARACTER_NAMES,
+    });
+}
+
+/**
+ * Returns the cached cast roster, fetching it on first call only. Never throws — a fetch/parse
+ * failure resolves to an empty array (logged via this module's own log()) so a network hiccup
+ * degrades to "no contacts found" rather than breaking the whole extension.
+ * @returns {Promise<Array<{fullName: string, entryName: string, macroKey: string, hasFullBot: boolean, portraitFirstName: string}>>}
+ */
+function getCastRoster() {
+    if (!castRosterPromise) {
+        const context = SillyTavern.getContext();
+        castRosterPromise = fetchCastRoster(context).catch(error => {
+            log('Cast roster discovery failed:', error);
+            return [];
+        });
+    }
+    return castRosterPromise;
+}
 // Flavor-app generation inherits the main roleplay's REAL system prompt (see runFlavorAppGeneration
 // below), which mandates the platform's own multi-section <analysis> block before any actual reply
 // content — unlike a normal WeyPhone texting turn, this isn't optional or skippable output, so the
@@ -1378,7 +1432,11 @@ function showScreen(view) {
     if (view === 'contacts') {
         title.textContent = 'New Message';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
-        const characters = getSelectableCharacters(context.characters, EXCLUDED_CHARACTER_NAMES);
+        // TODO(Task 7): rewire this screen against getCastRoster()'s dynamically-discovered
+        // subbot/full-bot roster instead of context.characters. This inline filter is a minimal
+        // stand-in that preserves current behavior now that getSelectableCharacters (which did
+        // the same filter) has been deleted from lib/characters.js.
+        const characters = context.characters.filter(character => !EXCLUDED_CHARACTER_NAMES.includes(character.name));
         const portraitMap = buildPortraitMap(context.characters, characters.map(c => c.name), context.getThumbnailUrl);
         renderContactsScreen(screenBody, characters, portraitMap);
         return;
@@ -1789,5 +1847,6 @@ function initPanel() {
 
 jQuery(async () => {
     initPanel();
+    getCastRoster();
     log('WeyPhone initialized');
 });
