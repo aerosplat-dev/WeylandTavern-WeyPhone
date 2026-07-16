@@ -1264,12 +1264,33 @@
     left: calc(var(--wp-stack-index) * 18px);
 }
 
-/* Group message rendering (iMessage-style): speaker name above the first message in a run,
-   avatar beside the last message in a run. */
+/* Group message rendering (iMessage-style): speaker name above the first message in a run, avatar
+   beside the last message in a run — both rendered as SIBLINGS of the bubble (.wp-message-item >
+   .wp-message-speaker-name + .wp-message-row > [.wp-message-avatar-slot] + .wp-message), never
+   children of it, so the bubble's own padding/background/border-radius stays confined to the
+   actual message text. .wp-message-item takes over the shrink-to-fit-width + side-alignment job
+   .wp-message handles on its own when it's a direct child of #wp-messages (typing indicator,
+   select/edit-mode bubbles) — see the plain .wp-message.wp-user/.wp-char rules below, which stay
+   in place for exactly that case and are simply redundant (harmless) once nested in here. */
+.wp-message-item {
+    display: flex;
+    flex-direction: column;
+    max-width: 80%;
+}
+
+.wp-message-item.wp-align-user {
+    align-self: flex-end;
+}
+
+.wp-message-item.wp-align-char {
+    align-self: flex-start;
+}
+
 .wp-message-speaker-name {
-    font-size: 0.75em;
-    opacity: 0.7;
-    margin: 4px 0 2px 40px; /* aligns with text after the avatar slot's width, not above the avatar itself */
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 0 0 3px 34px; /* aligns with the bubble's own left text edge: avatar slot (28px) + row gap (6px) */
 }
 
 .wp-message-row {
@@ -1289,4 +1310,16 @@
     height: 28px;
     border-radius: 50%;
     object-fit: cover;
+}
+
+/* A message that isn't first/last in its speaker's run gets a tightened corner on the side facing
+   its neighbor (always the left/avatar side, since group assistant bubbles are always
+   left-aligned) — the same "joined" treatment iMessage uses so a multi-message run reads as one
+   continuous thought rather than a stack of independently-rounded bubbles. */
+.wp-message.wp-run-not-first {
+    border-top-left-radius: 6px;
+}
+
+.wp-message.wp-run-not-last {
+    border-bottom-left-radius: 6px;
 }

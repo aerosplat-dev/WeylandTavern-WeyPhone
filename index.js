@@ -580,6 +580,12 @@ async function rerenderContactsScreen() {
     const priorInput = document.getElementById('wp-contact-search-input');
     const hadFocus = !!priorInput && document.activeElement === priorInput;
     const priorSelectionStart = hadFocus ? priorInput.selectionStart : null;
+    // #wp-contact-list is destroyed and recreated on every re-render too (same as the search
+    // input above) — toggling a checkbox in group-selection mode triggers a re-render just like
+    // typing does, so without restoring scrollTop here, checking a contact snaps the list back to
+    // the top every time instead of staying where the user was scrolled to.
+    const priorList = document.getElementById('wp-contact-list');
+    const priorScrollTop = priorList ? priorList.scrollTop : 0;
     renderContactsScreen(screenBody, {
         roster,
         groupMode: groupSelectionMode,
@@ -594,6 +600,8 @@ async function rerenderContactsScreen() {
             newInput.setSelectionRange(caretPos, caretPos);
         }
     }
+    const newList = document.getElementById('wp-contact-list');
+    if (newList) newList.scrollTop = priorScrollTop;
 }
 
 // Re-renders the currently-visible phone-app screen if the user is actually looking at the app
