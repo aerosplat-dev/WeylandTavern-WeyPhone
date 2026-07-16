@@ -1317,6 +1317,13 @@ function handleScreenBodyChange(event) {
     context.saveSettingsDebounced();
 }
 
+// Old context.characters-based contact picker, kept only until Task 7 replaces this whole screen
+// with the new cast-roster-driven "To:" composer. EXCLUDED_CHARACTER_NAMES (lib/characters.js) now
+// means something different (which lorebook entries to exclude from the NEW roster builder) — do
+// NOT reuse it here, that was a real regression: it silently let Weybot/Mirror Weyland/Kinsbane
+// Manor become selectable again. This local list preserves the ORIGINAL pre-Task-6 exclusion set.
+const LEGACY_CONTACTS_SCREEN_EXCLUDED_NAMES = ['Weybot', 'Mirror Weyland', 'Kinsbane Manor'];
+
 function showScreen(view) {
     currentView = view;
     // Navigating anywhere (including re-entering the same conversation) exits select mode —
@@ -1434,9 +1441,13 @@ function showScreen(view) {
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         // TODO(Task 7): rewire this screen against getCastRoster()'s dynamically-discovered
         // subbot/full-bot roster instead of context.characters. This inline filter is a minimal
-        // stand-in that preserves current behavior now that getSelectableCharacters (which did
-        // the same filter) has been deleted from lib/characters.js.
-        const characters = context.characters.filter(character => !EXCLUDED_CHARACTER_NAMES.includes(character.name));
+        // stand-in that genuinely preserves the original (pre-Task-6) contacts-screen behavior
+        // now that getSelectableCharacters (which did the same filter) has been deleted from
+        // lib/characters.js. Deliberately NOT reusing EXCLUDED_CHARACTER_NAMES here: Task 6
+        // repurposed that constant to mean "which lorebook entries to exclude from the new
+        // cast-roster builder" (now just ['Muse']), which is a different exclusion set than this
+        // legacy context.characters-based screen needs.
+        const characters = context.characters.filter(character => !LEGACY_CONTACTS_SCREEN_EXCLUDED_NAMES.includes(character.name));
         const portraitMap = buildPortraitMap(context.characters, characters.map(c => c.name), context.getThumbnailUrl);
         renderContactsScreen(screenBody, characters, portraitMap);
         return;
