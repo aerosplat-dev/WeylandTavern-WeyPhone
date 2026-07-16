@@ -19,8 +19,18 @@ import { parseTwitterPosts } from './lib/twitterParsing.js';
 import { PSA_ACCOUNTS } from './lib/twitterPrompts.js';
 import { WEYLAND_ROSTER } from './lib/weylandRoster.js';
 import { buildTwitterPrompt } from './lib/twitterPrompts.js';
-import { ravs } from '../../quick-reply-ext/src/rav.js';
-import { charPer } from '../../quick-reply-ext/src/charper.js';
+// Root-relative (leading "/"), NOT relative to this file's own location — quick-reply-ext is a
+// bundled core-adjacent extension that always lives at this fixed, SillyTavern-convention-dictated
+// URL (public/scripts/extensions/quick-reply-ext/), regardless of where WeyPhone itself is
+// installed. A relative specifier here (e.g. '../../quick-reply-ext/...') would resolve differently
+// depending on how many directory levels WeyPhone's own install sits under /scripts/extensions/ —
+// confirmed broken for a bundled-style install (public/scripts/extensions/Weyland-WeyPhone/, no
+// "third-party" segment), which has one fewer level than a third-party install and would resolve
+// one directory too high. This import is never exercised by the Node test suite (index.js is only
+// ever loaded by the real browser via SillyTavern's own <script type="module"> injection), so a
+// browser-only absolute path is safe here.
+import { ravs } from '/scripts/extensions/quick-reply-ext/src/rav.js';
+import { charPer } from '/scripts/extensions/quick-reply-ext/src/charper.js';
 
 // One of the 11 data-view values showScreen() sets on #wp-panel:
 // 'home' | 'contacts' | 'conversation' | 'memory' | 'messages' | 'threads' | 'phone-app' |
