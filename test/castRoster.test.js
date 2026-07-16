@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitFullName, extractMacroKey, findEntryTitleMatch } from '../lib/castRoster.js';
+import { splitFullName, extractMacroKey, findEntryTitleMatch, buildCastRoster } from '../lib/castRoster.js';
 
 test('splitFullName splits on spaces and drops a leading title token', () => {
     assert.deepEqual(splitFullName('Sayori Akiyama'), ['Sayori', 'Akiyama']);
@@ -69,4 +69,90 @@ test('findEntryTitleMatch only tries the first two tokens, ignoring anything pas
     const entries = [{ comment: 'Loren', content: '{{getvar::LN}}' }];
     // 'Loren Montenegro' -> tokens ['Loren', 'Montenegro'] after title-strip; only these two are tried.
     assert.deepEqual(findEntryTitleMatch(['Loren', 'Montenegro'], entries), { entryName: 'Loren', macroKey: 'LN' });
+});
+
+const WEYLAND_ENTRIES_FIXTURE = [
+    { comment: 'Belle', content: '{{getvar::BE}}' },
+    { comment: 'Professor Akiyama', content: '{{getvar::AK}}' },
+    { comment: 'Nathan', content: '{{getvar::NA}}' },
+    { comment: 'Red Lantern Ramen', content: '[RED LANTERN RAMEN]\nMr. Wolfy runs this place.' },
+    { comment: 'Loona', content: '{{getvar::VORTEX}}' }, // real entry, but no real content behind it (see Task 5 note)
+];
+
+test('buildCastRoster skips any character whose bot field contains "No Subbot"', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: {
+            'Loona': { bot: 'Loona, No Subbot' },
+            'Belle Calloway': { bot: 'Belle' },
+        },
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: ['Belle'],
+    });
+    assert.equal(roster.some(c => c.entryName === 'Loona'), false);
+    assert.equal(roster.length, 1);
+    assert.equal(roster[0].entryName, 'Belle');
+});
+
+test('buildCastRoster does NOT skip a "Coming Soon" (without "No Subbot") character', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: { 'Nathan Ashford': { bot: 'Coming Soon' } },
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: [],
+    });
+    assert.equal(roster.length, 1);
+    assert.equal(roster[0].entryName, 'Nathan');
+    assert.equal(roster[0].macroKey, 'NA');
+});
+
+test('buildCastRoster marks hasFullBot true only when the matched entryName is a charPer key', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: {
+            'Belle Calloway': { bot: 'Belle' },
+            'Nathan Ashford': { bot: 'Side Character' },
+        },
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: ['Belle'],
+    });
+    const belle = roster.find(c => c.entryName === 'Belle');
+    const nathan = roster.find(c => c.entryName === 'Nathan');
+    assert.equal(belle.hasFullBot, true);
+    assert.equal(nathan.hasFullBot, false);
+});
+
+test('buildCastRoster records fullName (for matching) separately from entryName (for display/resolution)', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: { 'Sayori Akiyama': { bot: 'Side Character' } },
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: ['Professor Akiyama'],
+    });
+    assert.deepEqual(roster[0], {
+        fullName: 'Sayori Akiyama',
+        entryName: 'Professor Akiyama',
+        macroKey: 'AK',
+        hasFullBot: true,
+        portraitFirstName: 'sayori',
+    });
+});
+
+test('buildCastRoster excludes an explicitly-named entry regardless of everything else (Muse case)', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: { 'Muse': { bot: 'Muse' } },
+        weylandEntries: [{ comment: 'Muse', content: '{{getvar::MU}}' }],
+        charPerKeys: ['Muse'],
+        excludedEntryNames: ['Muse'],
+    });
+    assert.equal(roster.length, 0);
+});
+
+test('buildCastRoster omits a character with no lorebook title match at all (Mr. Wolfy regression)', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: { 'Mr. Wolfy': { bot: 'Side Character' } },
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: [],
+    });
+    assert.equal(roster.length, 0);
+});
+
+test('buildCastRoster returns an empty array for an empty weybooru character set', () => {
+    assert.deepEqual(buildCastRoster({ weybooruCharacters: {}, weylandEntries: WEYLAND_ENTRIES_FIXTURE, charPerKeys: [] }), []);
 });
