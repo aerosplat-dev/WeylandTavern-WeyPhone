@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPortraitMap, buildPsaPortraitMap } from '../lib/portraits.js';
+import { ASSET_BASE_URL } from '../lib/assetPaths.js';
 
 function fakeGetThumbnailUrl(type, file) {
     return `/thumbnail?type=${type}&file=${file}`;
@@ -92,8 +93,12 @@ test('buildPsaPortraitMap resolves a bundled local asset keyed by portraitKey, n
         { name: 'Weyland Research Center', portraitKey: 'research' },
     ];
     const map = buildPsaPortraitMap(accounts);
-    assert.equal(map['Weyland Alert'].primaryUrl, '/scripts/extensions/third-party/Weyland-WeyPhone/assets/profiles/profile_alert.png');
-    assert.equal(map['Weyland Research Center'].primaryUrl, '/scripts/extensions/third-party/Weyland-WeyPhone/assets/profiles/profile_research.png');
+    // Built from the real ASSET_BASE_URL export rather than a hardcoded literal — that constant is
+    // itself derived from this extension's actual on-disk folder name (see lib/assetPaths.js), which
+    // is NOT guaranteed to be "Weyland-WeyPhone" on every install, so hardcoding it here would make
+    // this test machine-specific in exactly the way the underlying code was just fixed to avoid.
+    assert.equal(map['Weyland Alert'].primaryUrl, `${ASSET_BASE_URL}/profiles/profile_alert.png`);
+    assert.equal(map['Weyland Research Center'].primaryUrl, `${ASSET_BASE_URL}/profiles/profile_research.png`);
 });
 
 test('buildPsaPortraitMap never sets a fallbackUrl (local assets don\'t need a CDN-failure fallback) and derives initial from the account name', () => {
