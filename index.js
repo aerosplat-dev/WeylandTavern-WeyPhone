@@ -495,6 +495,14 @@ function runPhoneAppGeneration(appKey) {
 // the current in-memory tags/query state — guarded the same way as rerenderPhoneAppScreenIfVisible
 // (the user may navigate away, or the async getCastRoster() fetch may resolve, after this was
 // called from an event that's no longer relevant).
+//
+// renderContactComposerScreen replaces #wp-screen-body's ENTIRE innerHTML on every call, which
+// destroys and recreates #wp-to-input even though this runs on every keystroke (the 'input'
+// listener below calls this on every character typed). Removing a focused element from the DOM
+// blurs it, so without the explicit focus/caret restore here, typing more than one character would
+// silently stop reaching the input after the first re-render — confirmed live via Playwright
+// (typing "Nathan" character-by-character left only "N" in the field and no active element) before
+// this restore logic was added.
 async function rerenderContactComposerScreen() {
     if (currentView !== 'contacts') return;
     const screenBody = document.getElementById('wp-screen-body');
@@ -503,12 +511,23 @@ async function rerenderContactComposerScreen() {
     const settings = getSettings(context.extensionSettings);
     const roster = await getCastRoster();
     if (currentView !== 'contacts') return; // user may have navigated away while awaiting the roster
+    const priorInput = document.getElementById('wp-to-input');
+    const hadFocus = !!priorInput && document.activeElement === priorInput;
+    const priorSelectionStart = hadFocus ? priorInput.selectionStart : null;
     renderContactComposerScreen(screenBody, {
         roster,
         favoriteEntryNames: getFavoriteEntryNames(settings),
         query: contactComposerQuery,
         tags: contactComposerTags,
     });
+    if (hadFocus) {
+        const newInput = document.getElementById('wp-to-input');
+        if (newInput) {
+            newInput.focus();
+            const caretPos = priorSelectionStart ?? newInput.value.length;
+            newInput.setSelectionRange(caretPos, caretPos);
+        }
+    }
 }
 
 // Re-renders the currently-visible phone-app screen if the user is actually looking at the app
