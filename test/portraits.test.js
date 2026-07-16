@@ -87,6 +87,21 @@ test('buildPortraitMap does not throw on an undefined charName and falls back to
     assert.deepEqual(map[undefined], { primaryUrl: null, fallbackUrl: null, initial: '' });
 });
 
+test('buildPortraitMap prefers a portraitSlugOverrides entry over the name-derived guess (Margaret/marge regression)', () => {
+    const map = buildPortraitMap([], ['Margaret'], fakeGetThumbnailUrl, { Margaret: 'marge' });
+    assert.equal(map.Margaret.primaryUrl, 'https://cast.weybooru.com/images/portraits/marge.jpg');
+});
+
+test('buildPortraitMap falls back to the name-derived guess for any name absent from portraitSlugOverrides', () => {
+    const map = buildPortraitMap([], ['Rosa'], fakeGetThumbnailUrl, { Margaret: 'marge' });
+    assert.equal(map.Rosa.primaryUrl, 'https://cast.weybooru.com/images/portraits/rosa.jpg');
+});
+
+test('buildPortraitMap works unchanged with no portraitSlugOverrides argument at all', () => {
+    const map = buildPortraitMap([], ['Rosa'], fakeGetThumbnailUrl);
+    assert.equal(map.Rosa.primaryUrl, 'https://cast.weybooru.com/images/portraits/rosa.jpg');
+});
+
 test('buildPsaPortraitMap resolves a bundled local asset keyed by portraitKey, not a derived slug', () => {
     const accounts = [
         { name: 'Weyland Alert', portraitKey: 'alert' },

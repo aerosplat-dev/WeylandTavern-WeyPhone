@@ -131,8 +131,35 @@ test('buildCastRoster records fullName (for matching) separately from entryName 
         macroKey: 'AK',
         hasFullBot: true,
         hasSubbot: true,
-        portraitFirstName: 'sayori',
+        portraitSlug: 'sayori',
     });
+});
+
+test('buildCastRoster prefers weybooru\'s own "image" field over a name-derived guess (Garret/Margaret regression)', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: {
+            'Garret Sullivan': { bot: 'Side Character', image: 'garrett' },
+            'Margaret Sullivan': { bot: 'Side Character', image: 'marge' },
+        },
+        weylandEntries: [
+            { comment: 'Garret Sullivan', content: '{{getvar::GS}}' },
+            { comment: 'Margaret Sullivan', content: '{{getvar::MS}}' },
+        ],
+        charPerKeys: [],
+    });
+    const garret = roster.find(c => c.entryName === 'Garret Sullivan');
+    const margaret = roster.find(c => c.entryName === 'Margaret Sullivan');
+    assert.equal(garret.portraitSlug, 'garrett');
+    assert.equal(margaret.portraitSlug, 'marge');
+});
+
+test('buildCastRoster falls back to a name-derived guess when weybooru\'s "image" field is missing/blank', () => {
+    const roster = buildCastRoster({
+        weybooruCharacters: { 'Nathan Ashford': { bot: 'Side Character', image: '  ' } },
+        weylandEntries: WEYLAND_ENTRIES_FIXTURE,
+        charPerKeys: [],
+    });
+    assert.equal(roster[0].portraitSlug, 'nathan');
 });
 
 test('buildCastRoster marks every normally-discovered entry hasSubbot: true', () => {
@@ -159,7 +186,7 @@ test('buildCastRoster appends manualFullBotOnlyNames as hasSubbot: false, macroK
         macroKey: null,
         hasFullBot: true,
         hasSubbot: false,
-        portraitFirstName: 'loona',
+        portraitSlug: 'loona',
     });
     assert.equal(kressa.hasFullBot, false);
     assert.equal(kressa.hasSubbot, false);

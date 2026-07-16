@@ -71,13 +71,20 @@ const phoneAppGeneratingIds = new Set(); // tracks which app keys currently have
 // the real result once it's ready, instead of racing ahead with an empty list.
 let castRosterPromise = null;
 
+// Populated (keyed by entryName) as soon as castRosterPromise resolves — a synchronously-readable
+// snapshot for the many buildPortraitMap call sites below, which run synchronously inside render
+// functions and can't themselves await the roster fetch. Empty until the first resolution; every
+// buildPortraitMap call site degrades gracefully to its own name-derived guess for any name not
+// (yet) present here, same as before this override existed.
+let castRosterPortraitSlugs = {};
+
 /**
  * Fetches cast.weybooru.com's live character catalog and cross-references it against the Weyland
  * lorebook (via context.loadWorldInfo) and charPer.js (already imported in this file) to build the
  * complete subbot/full-bot contact roster. Real I/O lives here; buildCastRoster itself (imported
  * above) is pure and independently unit-tested — see lib/castRoster.js.
  * @param {ReturnType<typeof SillyTavern.getContext>} context
- * @returns {Promise<Array<{fullName: string, entryName: string, macroKey: string | null, hasFullBot: boolean, hasSubbot: boolean, portraitFirstName: string}>>}
+ * @returns {Promise<Array<{fullName: string, entryName: string, macroKey: string | null, hasFullBot: boolean, hasSubbot: boolean, portraitSlug: string}>>}
  */
 async function fetchCastRoster(context) {
     const response = await fetch('https://cast.weybooru.com/data/data.json');
@@ -107,7 +114,7 @@ async function fetchCastRoster(context) {
  * Returns the cached cast roster, fetching it on first call only. Never throws — a fetch/parse
  * failure resolves to an empty array (logged via this module's own log()) so a network hiccup
  * degrades to "no contacts found" rather than breaking the whole extension.
- * @returns {Promise<Array<{fullName: string, entryName: string, macroKey: string, hasFullBot: boolean, portraitFirstName: string}>>}
+ * @returns {Promise<Array<{fullName: string, entryName: string, macroKey: string, hasFullBot: boolean, portraitSlug: string}>>}
  */
 function getCastRoster() {
     if (!castRosterPromise) {
@@ -115,6 +122,9 @@ function getCastRoster() {
         castRosterPromise = fetchCastRoster(context).catch(error => {
             log('Cast roster discovery failed:', error);
             return [];
+        }).then(roster => {
+            for (const contact of roster) castRosterPortraitSlugs[contact.entryName] = contact.portraitSlug;
+            return roster;
         });
     }
     return castRosterPromise;
@@ -329,7 +339,7 @@ function rerenderConversationMessages() {
     if (!conversation) return;
     const isTyping = generatingConversationIds.has(currentConversationId);
     const isGroup = conversation.participants.length > 1;
-    const groupPortraitMap = isGroup ? buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl) : {};
+    const groupPortraitMap = isGroup ? buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl, castRosterPortraitSlugs) : {};
     renderMessages(document.getElementById('wp-messages'), conversation.messages, editingMessageIndex, isTyping, getSelectState(), { isGroup, portraitMap: groupPortraitMap });
     updateRegenerateEnabled(conversation);
 }
@@ -348,7 +358,7 @@ function rerenderIfStillViewing(conversationId, messages) {
     const settings = getSettings(context.extensionSettings);
     const conversation = getConversation(settings, conversationId);
     const isGroup = Boolean(conversation) && conversation.participants.length > 1;
-    const groupPortraitMap = isGroup ? buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl) : {};
+    const groupPortraitMap = isGroup ? buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl, castRosterPortraitSlugs) : {};
     renderMessages(messagesEl, messages, editingMessageIndex, isTyping, getSelectState(), { isGroup, portraitMap: groupPortraitMap });
     if (conversation) updateRegenerateEnabled(conversation);
 }
@@ -377,7 +387,7 @@ function renderMessagesScreenNow(context, settings) {
     if (!screenBody) return;
     const summaries = withTypingState(getAllConversationSummaries(settings), generatingConversationIds);
     const allParticipantNames = summaries.flatMap(summary => summary.participants);
-    const portraitMap = buildPortraitMap(context.characters, allParticipantNames, context.getThumbnailUrl);
+    const portraitMap = buildPortraitMap(context.characters, allParticipantNames, context.getThumbnailUrl, castRosterPortraitSlugs);
     renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
 }
 
@@ -388,7 +398,7 @@ function renderThreadsScreenNow(context, settings) {
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return null;
     const summaries = withTypingState(getThreadsFor(settings, currentThreadsFilter ?? []), generatingConversationIds);
-    const portraitMap = buildPortraitMap(context.characters, currentThreadsFilter ?? [], context.getThumbnailUrl);
+    const portraitMap = buildPortraitMap(context.characters, currentThreadsFilter ?? [], context.getThumbnailUrl, castRosterPortraitSlugs);
     renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
     return portraitMap;
 }
@@ -596,7 +606,7 @@ function findTwitterProfileSubject(name) {
 // names actually in view, and this guarantees a PSA account's local asset always wins over any
 // (wrong) weybooru-CDN guess buildPortraitMap would otherwise attempt for that same name.
 function buildTwitterPortraitMap(context, charNames) {
-    return { ...buildPortraitMap(context.characters, charNames, context.getThumbnailUrl), ...buildPsaPortraitMap(PSA_ACCOUNTS) };
+    return { ...buildPortraitMap(context.characters, charNames, context.getThumbnailUrl, castRosterPortraitSlugs), ...buildPsaPortraitMap(PSA_ACCOUNTS) };
 }
 
 /**
@@ -1627,7 +1637,7 @@ function showScreen(view) {
             return;
         }
         title.textContent = 'Memory';
-        const portraitMap = buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl);
+        const portraitMap = buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl, castRosterPortraitSlugs);
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), portraitMap[conversation.participants[0]]);
         rerenderMemoryScreen();
         return;
@@ -1640,7 +1650,7 @@ function showScreen(view) {
         return;
     }
     title.textContent = formatParticipantNames(conversation.participants);
-    const portraitMap = buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl);
+    const portraitMap = buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl, castRosterPortraitSlugs);
     const conversationPortraits = conversation.participants.map(name => portraitMap[name]);
     renderPanelAvatar(document.getElementById('wp-panel-avatar'), conversation.participants.length > 1 ? conversationPortraits : conversationPortraits[0]);
     renderConversationScreen(screenBody);
