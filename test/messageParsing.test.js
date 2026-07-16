@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReply } from '../lib/messageParsing.js';
+import { parseReply, parseGroupReply } from '../lib/messageParsing.js';
 
 test('parseReply extracts a single Incoming line after an analysis block', () => {
     const raw = '<analysis>reasoning here</analysis>\nIncoming¦3:47 PM¦Rosa¦hey whats up';
@@ -55,4 +55,49 @@ test('parseReply normalizes CRLF line endings before matching Incoming lines', (
 test('parseReply degrades gracefully (no throw) for null/undefined input, matching the "nothing usable survives" convention', () => {
     assert.deepEqual(parseReply(null), { messages: [], usedFallback: false });
     assert.deepEqual(parseReply(undefined), { messages: [], usedFallback: false });
+});
+
+test('parseReply behavior is unchanged after the preprocessReplyLines refactor (regression guard)', () => {
+    const raw = '<analysis>x</analysis>\nIncoming¦3:47 PM¦Rosa¦first\nIncoming¦3:48 PM¦Rosa¦second';
+    assert.deepEqual(parseReply(raw), { messages: ['first', 'second'], usedFallback: false });
+});
+
+test('parseGroupReply extracts each Incoming line with its own speaker name', () => {
+    const raw = '<analysis>x</analysis>\nIncoming¦3:47 PM¦Nathan¦hey\nIncoming¦3:48 PM¦Emily¦sup';
+    assert.deepEqual(parseGroupReply(raw), {
+        messages: [
+            { speaker: 'Nathan', content: 'hey' },
+            { speaker: 'Emily', content: 'sup' },
+        ],
+        usedFallback: false,
+    });
+});
+
+test('parseGroupReply does NOT mistake an Incoming-shaped line inside the analysis block for a real message (phantom-message regression guard)', () => {
+    const raw = '<analysis>Nathan should say something like Incoming¦3:47 PM¦Nathan¦fake, but only in the real reply below</analysis>\nIncoming¦3:50 PM¦Nathan¦the real one';
+    assert.deepEqual(parseGroupReply(raw), {
+        messages: [{ speaker: 'Nathan', content: 'the real one' }],
+        usedFallback: false,
+    });
+});
+
+test('parseGroupReply falls back to a single speaker-less message when no Incoming lines are found, instead of silently losing the reply (silent-data-loss regression guard)', () => {
+    const raw = '<analysis>x</analysis>\nNathan just stares at his phone, unsure what to say.';
+    assert.deepEqual(parseGroupReply(raw), {
+        messages: [{ speaker: null, content: 'Nathan just stares at his phone, unsure what to say.' }],
+        usedFallback: true,
+    });
+});
+
+test('parseGroupReply strips a trailing footer line the same way parseReply does', () => {
+    const raw = '<analysis>x</analysis>\nIncoming¦3:47 PM¦Nathan¦hey\n[Amusement] [RC]';
+    assert.deepEqual(parseGroupReply(raw), {
+        messages: [{ speaker: 'Nathan', content: 'hey' }],
+        usedFallback: false,
+    });
+});
+
+test('parseGroupReply returns no messages when the analysis block is never closed, same as parseReply', () => {
+    const raw = '<analysis>reasoning that got cut off mid-stream';
+    assert.deepEqual(parseGroupReply(raw), { messages: [], usedFallback: false });
 });

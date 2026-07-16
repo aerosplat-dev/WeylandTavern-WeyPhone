@@ -9,7 +9,7 @@ import { getFavoriteEntryNames, toggleFavorite } from './lib/favorites.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
-import { parseReply } from './lib/messageParsing.js';
+import { parseReply, parseGroupReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
@@ -960,26 +960,31 @@ async function generateReply(conversationId, conversation, context, settings) {
         });
 
         const replyText = extractResponseText(result);
-        const parsed = parseReply(replyText);
-        if (parsed.messages.length === 0) {
-            throw new Error('The model did not return any usable content.');
-        }
         if (isGroup) {
-            // parseReply's own output (parsed.messages, checked above only as a generic
-            // empty-response guard) discards each line's [Name] field — re-extract the real
-            // speaker per line from the raw reply text here instead of storing parsed.messages'
-            // combined/name-less content, one appendMessage call per Incoming¦ line so each
-            // stored message carries its own correct `speaker`. Deliberately does not modify
-            // parseReply itself (out of scope for this task — see Task 9 brief).
-            const rawLines = replyText.split('\n').filter(line => line.startsWith('Incoming¦'));
-            for (const line of rawLines) {
-                const parts = line.split('¦');
-                const speaker = parts[2] ?? entryNameForMacros;
-                const text = parts.slice(3).join('¦').trim();
-                if (!text) continue;
-                appendMessage(settings, conversationId, { role: 'assistant', content: text, speaker, timestamp: genTimestamp() });
+            // Shares parseReply's own analysis-stripping/footer-stripping/fallback logic via
+            // parseGroupReply, which additionally preserves each Incoming¦ line's speaker name
+            // (see lib/messageParsing.js) — fixes a phantom-message risk (an Incoming¦-shaped
+            // line inside the model's own <analysis> block being mistaken for a real message)
+            // and a silent-data-loss risk (a format-breaking reply being dropped with no stored
+            // message and no user-visible error) that the prior ad-hoc raw re-split here had.
+            const { messages: groupMessages } = parseGroupReply(replyText);
+            if (groupMessages.length === 0) {
+                toastr.warning('The model did not return usable content this time.', 'WeyPhone');
+                return;
+            }
+            for (const { speaker, content } of groupMessages) {
+                appendMessage(settings, conversationId, {
+                    role: 'assistant',
+                    content,
+                    speaker: speaker ?? entryNameForMacros,
+                    timestamp: genTimestamp(),
+                });
             }
         } else {
+            const parsed = parseReply(replyText);
+            if (parsed.messages.length === 0) {
+                throw new Error('The model did not return any usable content.');
+            }
             for (const messageText of parsed.messages) {
                 appendMessage(settings, conversationId, { role: 'assistant', content: messageText, timestamp: genTimestamp() });
             }
