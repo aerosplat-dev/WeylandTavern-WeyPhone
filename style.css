@@ -1385,3 +1385,80 @@
 .wp-message.wp-run-not-last {
     border-bottom-left-radius: 6px;
 }
+
+/* Configure-Nicknames floating frame — lives OUTSIDE #wp-portal (its own stacking context). */
+#wp-nickname-config-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+}
+#wp-nickname-config-overlay .wp-nick-frame {
+    width: min(520px, 92vw);
+    max-height: 88vh;
+    overflow-y: auto;
+    background: var(--SmartThemeBlurTintColor, #1b1b1f);
+    color: var(--SmartThemeBodyColor, #e6e6e6);
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+#wp-nickname-config-overlay h3 { margin: 0 0 12px; }
+#wp-nickname-config-overlay h4 { margin: 16px 0 6px; }
+#wp-nickname-config-overlay .wp-nick-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px;
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 8px;
+    min-height: 38px;
+}
+#wp-nickname-config-overlay .wp-nick-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    background: var(--SmartThemeQuoteColor, #3a3a44);
+    border-radius: 999px;
+    font-size: 0.85em;
+}
+#wp-nickname-config-overlay .wp-nick-chip button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+#wp-nickname-config-overlay .wp-nick-chip-input {
+    flex: 1 1 80px;
+    min-width: 80px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    outline: none;
+}
+#wp-nickname-config-overlay .wp-nick-char-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+#wp-nickname-config-overlay .wp-nick-char-row label { flex: 0 0 40%; }
+#wp-nickname-config-overlay .wp-nick-char-row input { flex: 1 1 auto; }
+#wp-nickname-config-overlay .wp-nick-error {
+    color: #ff6b6b;
+    margin-top: 10px;
+    min-height: 1.2em;
+}
+#wp-nickname-config-overlay .wp-nick-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}

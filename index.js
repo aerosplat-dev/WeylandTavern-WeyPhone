@@ -26,6 +26,7 @@ import { WEYLAND_ROSTER, TWITTER_ONLY_ROSTER } from './lib/weylandRoster.js';
 import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 import { buildCastRoster } from './lib/castRoster.js';
 import { resolveSubbotPersonality } from './lib/subbotContent.js';
+import { parseNicknameTags, validateNicknamePools } from './lib/nicknames.js';
 // Root-relative (leading "/"), NOT relative to this file's own location — quick-reply-ext is a
 // bundled core-adjacent extension that always lives at this fixed, SillyTavern-convention-dictated
 // URL (public/scripts/extensions/quick-reply-ext/), regardless of where WeyPhone itself is
@@ -2304,6 +2305,140 @@ async function initExtensionSettingsPanel() {
     } catch (error) {
         log('Connection Manager not available for the WeyPhone settings panel:', error);
     }
+
+    const nicknamesButton = document.getElementById('wp-settings-nicknames-button');
+    if (nicknamesButton) {
+        nicknamesButton.addEventListener('click', () => renderNicknameConfigFrame());
+    }
+}
+
+/**
+ * Builds and shows the floating Configure-Nicknames frame OUTSIDE #wp-portal (its own DOM/z-index
+ * context, z-index 1000000). Left section: a comma/Enter-committed tag-chip editor for
+ * userNicknames. Right section: one text field per roster contact for characterNicknames. Validates
+ * via validateNicknamePools on Save; on conflict shows an error and does NOT persist.
+ */
+function renderNicknameConfigFrame() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    document.getElementById('wp-nickname-config-overlay')?.remove();
+
+    // Working copies — only committed to settings on a successful Save.
+    let userNicknames = [...settings.userNicknames];
+    const characterNicknames = { ...settings.characterNicknames };
+
+    const overlay = document.createElement('div');
+    overlay.id = 'wp-nickname-config-overlay';
+    const frame = document.createElement('div');
+    frame.className = 'wp-nick-frame';
+    overlay.appendChild(frame);
+
+    const title = document.createElement('h3');
+    title.textContent = 'Configure Nicknames';
+    frame.appendChild(title);
+
+    // --- userNicknames tag-chip editor ---
+    const userHeading = document.createElement('h4');
+    userHeading.textContent = 'Names characters call you';
+    frame.appendChild(userHeading);
+    const chips = document.createElement('div');
+    chips.className = 'wp-nick-chips';
+    frame.appendChild(chips);
+
+    const chipInput = document.createElement('input');
+    chipInput.className = 'wp-nick-chip-input';
+    chipInput.type = 'text';
+    chipInput.placeholder = 'Type a name, then comma or Enter…';
+
+    const renderChips = () => {
+        chips.querySelectorAll('.wp-nick-chip').forEach(el => el.remove());
+        for (const name of userNicknames) {
+            const chip = document.createElement('span');
+            chip.className = 'wp-nick-chip';
+            const label = document.createElement('span');
+            label.textContent = name;
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.textContent = '×';
+            remove.addEventListener('click', () => {
+                userNicknames = userNicknames.filter(n => n !== name);
+                renderChips();
+            });
+            chip.append(label, remove);
+            chips.insertBefore(chip, chipInput);
+        }
+    };
+    chips.appendChild(chipInput);
+
+    const commitInput = () => {
+        for (const tag of parseNicknameTags(chipInput.value)) {
+            if (!userNicknames.some(n => n.toLowerCase() === tag.toLowerCase())) userNicknames.push(tag);
+        }
+        chipInput.value = '';
+        renderChips();
+    };
+    chipInput.addEventListener('keydown', (e) => {
+        if (e.key === ',' || e.key === 'Enter') { e.preventDefault(); commitInput(); }
+    });
+    chipInput.addEventListener('blur', commitInput);
+    renderChips();
+
+    // --- characterNicknames per-contact fields ---
+    const charHeading = document.createElement('h4');
+    charHeading.textContent = 'Custom name per contact';
+    frame.appendChild(charHeading);
+    for (const entry of castRosterEntries) {
+        const row = document.createElement('div');
+        row.className = 'wp-nick-char-row';
+        const label = document.createElement('label');
+        label.textContent = entry.fullName || entry.entryName;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'text_pole';
+        input.value = characterNicknames[entry.entryName] || '';
+        input.placeholder = 'optional';
+        input.addEventListener('input', () => {
+            const v = input.value.trim();
+            if (v) characterNicknames[entry.entryName] = v;
+            else delete characterNicknames[entry.entryName];
+        });
+        row.append(label, input);
+        frame.appendChild(row);
+    }
+
+    const errorEl = document.createElement('div');
+    errorEl.className = 'wp-nick-error';
+    frame.appendChild(errorEl);
+
+    const actions = document.createElement('div');
+    actions.className = 'wp-nick-actions';
+    const cancelBtn = document.createElement('input');
+    cancelBtn.className = 'menu_button';
+    cancelBtn.type = 'button';
+    cancelBtn.value = 'Cancel';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+    const saveBtn = document.createElement('input');
+    saveBtn.className = 'menu_button';
+    saveBtn.type = 'button';
+    saveBtn.value = 'Save';
+    saveBtn.addEventListener('click', () => {
+        commitInput();
+        const { valid, conflicts } = validateNicknamePools(userNicknames, characterNicknames);
+        if (!valid) {
+            errorEl.textContent = `These names are used for both you and a character: ${conflicts.join(', ')}. Make each unique.`;
+            return;
+        }
+        settings.userNicknames = userNicknames;
+        settings.characterNicknames = characterNicknames;
+        context.saveSettingsDebounced();
+        overlay.remove();
+    });
+    actions.append(cancelBtn, saveBtn);
+    frame.appendChild(actions);
+
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+    chipInput.focus();
 }
 
 /**
