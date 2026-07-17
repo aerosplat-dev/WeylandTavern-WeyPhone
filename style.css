@@ -440,6 +440,10 @@
     height: 100%;
     object-fit: cover;
     display: block;
+    /* Self-clips to match the parent's rounded corners, since the messages tile's icon container
+       has overflow: visible (to let its unread badge float outside the corner) rather than relying
+       on the parent's overflow: hidden clip that every other tile still uses. */
+    border-radius: 14px;
 }
 
 .wp-app-label {
@@ -748,6 +752,49 @@
     color: var(--SmartThemeEmColor, #888);
     white-space: nowrap;
 }
+
+.wp-unread-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: #e5484d;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    box-sizing: border-box;
+}
+.wp-unread-badge[hidden] { display: none; }
+
+/* Toggle button badge floats at the top-right corner of the floating button. #wp-toggle-button is
+   already position:absolute (see its own rule above), which already establishes the containing
+   block this badge needs — not redeclared here to avoid clobbering that positioning. */
+#wp-toggle-unread-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    z-index: 1;
+}
+
+/* Messages home-tile badge floats at the top-right of the tile's icon. .wp-app-icon normally clips
+   (overflow: hidden, for the rounded-corner image mask) — scoped to just the messages tile so
+   every other app tile keeps its clipped rounded-corner icon unaffected. */
+.wp-app-tile[data-app="messages"] .wp-app-icon {
+    position: relative;
+    overflow: visible;
+}
+#wp-messages-tile-unread-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+}
+
+/* Per-row badge sits inline in the conversation list's meta column. */
+.wp-list-item-unread { margin: 2px 0; }
 
 .wp-list-item-delete {
     background: none;

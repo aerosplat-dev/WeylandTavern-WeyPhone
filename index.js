@@ -775,6 +775,59 @@ function refreshVisibleScreen() {
     }
 }
 
+// True only when `conversationId` is the conversation currently shown in the conversation view AND
+// its message list is scrolled to (within 4px of) the bottom — the exact "user is watching new
+// arrivals" condition under which an appended assistant message should NOT count as unread.
+function isConversationOpenAtBottom(conversationId) {
+    if (currentView !== 'conversation' || currentConversationId !== conversationId) return false;
+    const el = document.getElementById('wp-messages');
+    if (!el) return false;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 4;
+}
+
+// Generic unread accrual for an assistant-message append: if the user is actively watching the
+// bottom of this exact thread, it's already "read" (clear to 0); otherwise add the increment. Call
+// this AFTER any re-render of the conversation view (a re-render force-scrolls to the bottom, so the
+// at-bottom check reflects the final state). Not Hijack-specific — every assistant-append site uses it.
+function accrueUnread(settings, conversationId, incrementCount) {
+    const conversation = getConversation(settings, conversationId);
+    if (!conversation) return;
+    if (isConversationOpenAtBottom(conversationId)) {
+        conversation.unreadCount = 0;
+    } else {
+        conversation.unreadCount = (conversation.unreadCount ?? 0) + incrementCount;
+    }
+}
+
+// Recomputes the SUM of unreadCount across all conversations and paints it on the toggle-button
+// badge and (if the home grid is showing) the Messages tile badge; re-renders the Messages list if
+// it's the visible view so per-row counts stay live.
+function refreshUnreadBadges() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const total = Object.values(settings.conversations).reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
+    const label = total > 99 ? '99+' : String(total);
+    for (const id of ['wp-toggle-unread-badge', 'wp-messages-tile-unread-badge']) {
+        const badge = document.getElementById(id);
+        if (!badge) continue;
+        badge.textContent = label;
+        badge.hidden = total === 0;
+    }
+    if (currentView === 'messages') renderMessagesScreenNow(context, settings);
+}
+
+// Clears a thread's unread badge once the user has it open AND scrolled to the bottom.
+function clearUnreadIfAtBottom(conversationId) {
+    if (!isConversationOpenAtBottom(conversationId)) return;
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, conversationId);
+    if (!conversation || (conversation.unreadCount ?? 0) === 0) return;
+    conversation.unreadCount = 0;
+    context.saveSettingsDebounced();
+    refreshUnreadBadges();
+}
+
 // Re-renders the Memory view (list + settings shell, repopulated) if it's currently visible —
 // called after any memory CRUD action or settings change.
 function rerenderMemoryScreen() {
@@ -1096,6 +1149,11 @@ async function generateReply(conversationId, conversation, context, settings) {
             }
         }
         rerenderIfStillViewing(conversationId, conversation.messages);
+        const assistantAppended = isGroup
+            ? parseGroupReply(replyText).messages.length
+            : parseReply(replyText).messages.length;
+        accrueUnread(settings, conversationId, assistantAppended);
+        refreshUnreadBadges();
         context.saveSettingsDebounced();
 
         const exchangeCount = countExchangesSince(conversation.messages, conversation.lastMemoryMessageIndex ?? 0);
@@ -1663,7 +1721,8 @@ function showScreen(view) {
         title.textContent = 'Home';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         const flavorAppsEnabled = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
-        renderAppGridScreen(screenBody, { flavorAppsEnabled });
+        const messagesUnreadTotal = Object.values(settings.conversations).reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
+        renderAppGridScreen(screenBody, { flavorAppsEnabled, messagesUnreadTotal });
         return;
     }
 
@@ -1778,6 +1837,10 @@ function showScreen(view) {
     // entering the conversation view freshly re-verifies the disabled state against the
     // currently-active main roleplay rather than assuming the last CHAT_CHANGED left it correct.
     updateTetheredToggleAvailability();
+    // Opening a short thread auto-scrolls to the bottom (renderMessages does this), so a freshly
+    // opened, fully-visible thread clears its unread immediately; a long thread opened NOT at the
+    // bottom stays badged until the user scrolls down (handled by the scroll listener in initPanel).
+    clearUnreadIfAtBottom(currentConversationId);
 }
 
 // SillyTavern's mobile CSS sets `body { position: fixed; overflow: hidden; }`, which breaks
@@ -2109,6 +2172,15 @@ function initPanel() {
         img.src = fallbackUrl;
     }, true);
 
+    // 'scroll' events don't bubble either, so this must also be attached with `capture: true` to
+    // catch it via delegation on the stable #wp-panel, since #wp-messages is rebuilt on every
+    // conversation open (a direct listener on it would be lost on the next re-render).
+    panel.addEventListener('scroll', (event) => {
+        if (!(event.target instanceof HTMLElement) || event.target.id !== 'wp-messages') return;
+        if (currentView !== 'conversation' || !currentConversationId) return;
+        clearUnreadIfAtBottom(currentConversationId);
+    }, true);
+
     document.getElementById('wp-tethered-checkbox').addEventListener('change', (event) => {
         if (!currentConversationId) return;
         const context = SillyTavern.getContext();
@@ -2163,6 +2235,8 @@ function initPanel() {
         contactSearchQuery = event.target.value;
         rerenderContactsScreen();
     });
+
+    refreshUnreadBadges();
 }
 
 /**
