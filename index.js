@@ -14,7 +14,7 @@ import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
 import { resolveMainChatAnchor } from './lib/mainChatAnchor.js';
-import { buildMainChatInjectionPlan } from './lib/mainChatInjection.js';
+import { buildMainChatInjectionPlan, planTetherExtensionPromptOps } from './lib/mainChatInjection.js';
 import { PHONE_APP_PROMPTS } from './lib/phoneAppPrompts.js';
 import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
 import { parsePhoneAppOutput } from './lib/phoneAppFormatting.js';
@@ -2205,35 +2205,36 @@ async function weyPhoneMainChatInterceptor() {
     try {
         const context = SillyTavern.getContext();
         const settings = getSettings(context.extensionSettings);
-        if (!settings.bidirectionalTetheringEnabled) return;
-        if (!isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId })) return;
+        // Never early-return before reconciliation: when the feature is off or no main roleplay is
+        // active, we compute an EMPTY plan and still run planTetherExtensionPromptOps, which then
+        // emits clear ops for anything a prior generation injected. Early-returning here (as an
+        // earlier version did) skipped that cleanup, so turning the setting off mid-chat left stale
+        // tethered blocks bleeding into every subsequent generation until a full page reload.
+        const active = settings.bidirectionalTetheringEnabled &&
+            isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
 
-        const tetheredConversations = Object.values(settings.conversations).filter(c => c.tethered);
-        const userName = context.name1 || 'User';
-        const plan = buildMainChatInjectionPlan({
-            tetheredConversations,
-            currentMainChatLength: context.chat?.length ?? 0,
-            userName,
-            formatClockTime,
+        let plan = { cautionBlock: null, groups: [] };
+        if (active) {
+            const tetheredConversations = Object.values(settings.conversations).filter(c => c.tethered);
+            const userName = context.name1 || 'User';
+            plan = buildMainChatInjectionPlan({
+                tetheredConversations,
+                currentMainChatLength: context.chat?.length ?? 0,
+                userName,
+                formatClockTime,
+            });
+        }
+
+        const { ops, nextKeys } = planTetherExtensionPromptOps(plan, weyPhoneTetherExtensionPromptKeys, {
+            cautionKey: WEYPHONE_TETHER_CAUTION_KEY,
+            positionInPrompt: EXTENSION_PROMPT_POSITION_IN_PROMPT,
+            positionInChat: EXTENSION_PROMPT_POSITION_IN_CHAT,
+            positionNone: EXTENSION_PROMPT_POSITION_NONE,
         });
-
-        const newKeys = new Set();
-        if (plan.cautionBlock) {
-            context.setExtensionPrompt(WEYPHONE_TETHER_CAUTION_KEY, plan.cautionBlock, EXTENSION_PROMPT_POSITION_IN_PROMPT, 0);
-            newKeys.add(WEYPHONE_TETHER_CAUTION_KEY);
-        } else if (weyPhoneTetherExtensionPromptKeys.has(WEYPHONE_TETHER_CAUTION_KEY)) {
-            context.setExtensionPrompt(WEYPHONE_TETHER_CAUTION_KEY, '', EXTENSION_PROMPT_POSITION_NONE, 0);
+        for (const op of ops) {
+            context.setExtensionPrompt(op.key, op.content, op.position, op.depth);
         }
-        for (const group of plan.groups) {
-            context.setExtensionPrompt(group.key, group.content, EXTENSION_PROMPT_POSITION_IN_CHAT, group.depth);
-            newKeys.add(group.key);
-        }
-        for (const staleKey of weyPhoneTetherExtensionPromptKeys) {
-            if (!newKeys.has(staleKey)) {
-                context.setExtensionPrompt(staleKey, '', EXTENSION_PROMPT_POSITION_NONE, 0);
-            }
-        }
-        weyPhoneTetherExtensionPromptKeys = newKeys;
+        weyPhoneTetherExtensionPromptKeys = nextKeys;
     } catch (error) {
         log('Bi-directional tether injection failed:', error);
     }

@@ -5,8 +5,11 @@ import {
     anchorToDepth,
     groupInjectableItemsByAnchor,
     buildMainChatInjectionPlan,
+    planTetherExtensionPromptOps,
     TETHER_CAUTION_BLOCK,
 } from '../lib/mainChatInjection.js';
+
+const POS = { cautionKey: 'weyphone_tether_caution', positionInPrompt: 0, positionInChat: 1, positionNone: -1 };
 
 function formatClockTime(epochMs) {
     return `T${epochMs}`;
@@ -182,4 +185,56 @@ test('buildMainChatInjectionPlan interleaves two threads with different anchors 
     const byKey = Object.fromEntries(plan.groups.map(g => [g.key, g]));
     assert.equal(byKey['weyphone_tether_convA_2'].depth, 8);
     assert.equal(byKey['weyphone_tether_convB_9'].depth, 1);
+});
+
+test('planTetherExtensionPromptOps emits set ops for the caution block and each group, tracking their keys', () => {
+    const plan = {
+        cautionBlock: 'CAUTION',
+        groups: [
+            { key: 'weyphone_tether_convA_0', depth: 0, content: 'A' },
+            { key: 'weyphone_tether_convB_3', depth: 3, content: 'B' },
+        ],
+    };
+    const { ops, nextKeys } = planTetherExtensionPromptOps(plan, new Set(), POS);
+    assert.deepEqual(ops, [
+        { key: 'weyphone_tether_caution', content: 'CAUTION', position: 0, depth: 0 },
+        { key: 'weyphone_tether_convA_0', content: 'A', position: 1, depth: 0 },
+        { key: 'weyphone_tether_convB_3', content: 'B', position: 1, depth: 3 },
+    ]);
+    assert.deepEqual([...nextKeys].sort(), ['weyphone_tether_caution', 'weyphone_tether_convA_0', 'weyphone_tether_convB_3']);
+});
+
+test('planTetherExtensionPromptOps clears every previously-set key when the new plan is empty (reversibility)', () => {
+    // Regression: turning the feature off (or leaving the main chat) yields an empty plan; every
+    // key set on a prior generation must be explicitly cleared, or stale injections linger in ST's
+    // extension_prompts and keep bleeding into generations after the feature is off.
+    const emptyPlan = { cautionBlock: null, groups: [] };
+    const previousKeys = new Set(['weyphone_tether_caution', 'weyphone_tether_convA_0']);
+    const { ops, nextKeys } = planTetherExtensionPromptOps(emptyPlan, previousKeys, POS);
+    assert.deepEqual(ops, [
+        { key: 'weyphone_tether_caution', content: '', position: -1, depth: 0 },
+        { key: 'weyphone_tether_convA_0', content: '', position: -1, depth: 0 },
+    ]);
+    assert.equal(nextKeys.size, 0);
+});
+
+test('planTetherExtensionPromptOps clears only the keys that dropped out of the new plan', () => {
+    const plan = {
+        cautionBlock: 'CAUTION',
+        groups: [{ key: 'weyphone_tether_convA_0', depth: 0, content: 'A' }],
+    };
+    const previousKeys = new Set(['weyphone_tether_caution', 'weyphone_tether_convA_0', 'weyphone_tether_convB_3']);
+    const { ops, nextKeys } = planTetherExtensionPromptOps(plan, previousKeys, POS);
+    assert.deepEqual(ops, [
+        { key: 'weyphone_tether_caution', content: 'CAUTION', position: 0, depth: 0 },
+        { key: 'weyphone_tether_convA_0', content: 'A', position: 1, depth: 0 },
+        { key: 'weyphone_tether_convB_3', content: '', position: -1, depth: 0 },
+    ]);
+    assert.deepEqual([...nextKeys].sort(), ['weyphone_tether_caution', 'weyphone_tether_convA_0']);
+});
+
+test('planTetherExtensionPromptOps is a no-op when the plan is empty and nothing was set before', () => {
+    const { ops, nextKeys } = planTetherExtensionPromptOps({ cautionBlock: null, groups: [] }, new Set(), POS);
+    assert.deepEqual(ops, []);
+    assert.equal(nextKeys.size, 0);
 });
