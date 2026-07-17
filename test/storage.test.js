@@ -26,6 +26,7 @@ import {
     getThreadsFor,
     findMostRecentThread,
     migrateParticipantsField,
+    migrateUnreadCountField,
     genTimestamp,
     DEFAULT_MEMORY_PRIMARY_MODEL,
     DEFAULT_MEMORY_BACKUP_MODEL,
@@ -650,4 +651,30 @@ test('migrateParticipantsField is a no-op for a conversation that already has pa
     const settings = { conversations: { conv_1: { id: 'conv_1', participants: ['Belle', 'Blake'], messages: [], createdAt: 1, lastActive: 1 } } };
     migrateParticipantsField(settings);
     assert.deepEqual(settings.conversations.conv_1.participants, ['Belle', 'Blake']);
+});
+
+test('createConversation initializes unreadCount to 0', () => {
+    const settings = { conversations: {} };
+    const conv = createConversation(settings, ['Rosa']);
+    assert.equal(conv.unreadCount, 0);
+});
+
+test('migrateUnreadCountField backfills 0 on a conversation missing it, idempotently', () => {
+    const settings = { conversations: {
+        a: { id: 'a', participants: ['Rosa'], messages: [] },
+        b: { id: 'b', participants: ['Belle'], messages: [], unreadCount: 5 },
+    } };
+    migrateUnreadCountField(settings);
+    assert.equal(settings.conversations.a.unreadCount, 0);
+    assert.equal(settings.conversations.b.unreadCount, 5); // existing value untouched
+    migrateUnreadCountField(settings);
+    assert.equal(settings.conversations.b.unreadCount, 5); // still idempotent
+});
+
+test('getAllConversationSummaries carries unreadCount through', () => {
+    const settings = { conversations: {
+        a: { id: 'a', participants: ['Rosa'], messages: [{ role: 'assistant', content: 'hey' }], lastActive: 1, unreadCount: 3 },
+    } };
+    const summaries = getAllConversationSummaries(settings);
+    assert.equal(summaries[0].unreadCount, 3);
 });
