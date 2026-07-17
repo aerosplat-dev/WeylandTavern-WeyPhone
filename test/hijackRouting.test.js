@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveHijackSpeaker, resolveUserReference, shouldProcessHijackMessage, planHijackCapture } from '../lib/hijackRouting.js';
+import { resolveHijackSpeaker, resolveUserReference, evaluateScope, shouldProcessHijackMessage, planHijackCapture } from '../lib/hijackRouting.js';
 
 const ROSTER = [
     { entryName: 'Rosa', fullName: 'Rosa Vermillion', hasFullBot: true, hasSubbot: true },
@@ -126,4 +126,77 @@ test('planHijackCapture: empty-text lines are dropped from the appended messages
     const plan = planHijackCapture(block, ROSTER, settings);
     assert.deepEqual(plan.messages, [{ role: 'assistant', content: 'hey' }]);
     assert.equal(plan.unreadIncrement, 1);
+});
+
+const CTX = { userName: 'Tim', userNicknames: ['juicebox'], castRoster: ROSTER, characterNicknames: {} };
+const scope = (owner, title, lines) => ({ owner, title, lines, lineIndices: [] });
+const inc = (sender, text) => ({ direction: 'Incoming', sender, text });
+const out = (sender, text) => ({ direction: 'Outgoing', sender, text });
+
+test('evaluateScope: owner set, matches {{user}} -> PERSPECTIVE USER', () => {
+    const s = scope('Tim', null, [inc('Rosa', 'hey'), out('Tim', 'hi')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
+});
+
+test('evaluateScope: owner set, matches a user NICKNAME -> PERSPECTIVE USER', () => {
+    const s = scope('juicebox', null, [inc('Rosa', 'hey')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
+});
+
+test('evaluateScope: owner set, matches the roster -> PERSPECTIVE CHAR with ownerEntryName', () => {
+    // Blake's phone; Tim (user) texts in -> participation TRUE via Incoming sender.
+    const s = scope('Blake', null, [inc('Tim', 'you up?'), out('Blake', 'yeah')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'CHAR', ownerEntryName: 'Blake' });
+});
+
+test('evaluateScope: owner set, matches neither {{user}} nor roster -> dropped', () => {
+    const s = scope('Stranger', null, [inc('Rosa', 'hey')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+});
+
+test('evaluateScope: owner unset, no Outgoing, {{user}} NOT an Incoming sender -> USER (today default)', () => {
+    const s = scope(null, null, [inc('Rosa', 'hey'), inc('Rosa', 'you there?')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
+});
+
+test('evaluateScope: FLAGGED EDGE — owner unset, no Outgoing, {{user}} IS an Incoming sender -> dropped', () => {
+    const s = scope(null, null, [inc('Tim', 'weird self-text')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+});
+
+test('evaluateScope: owner unset, Outgoing first-sender is {{user}} -> USER', () => {
+    const s = scope(null, null, [out('Tim', 'yo'), inc('Rosa', 'hey')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
+});
+
+test('evaluateScope: owner unset, Outgoing first-sender is a roster char, {{user}} in Incoming -> CHAR', () => {
+    const s = scope(null, null, [out('Blake', 'hey'), inc('Tim', 'sup')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'CHAR', ownerEntryName: 'Blake' });
+});
+
+test('evaluateScope: owner unset, Outgoing first-sender matches neither -> dropped', () => {
+    const s = scope(null, null, [out('Stranger', 'hey')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+});
+
+test('evaluateScope: CHAR participation via TITLE partial-matching {{user}}', () => {
+    // Blake's phone, title names the user; no {{user}} Incoming sender needed.
+    const s = scope('Blake', 'Tim', [inc('Rosa', 'group msg'), out('Blake', 'reply')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'CHAR', ownerEntryName: 'Blake' });
+});
+
+test('evaluateScope: FLAGGED EDGE — fully-indeterminate CHAR, no title, {{user}} absent -> dropped (participation FALSE)', () => {
+    const s = scope(null, null, [out('Blake', 'hey'), inc('Rosa', 'hi')]); // CHAR from Outgoing, no title, no user
+    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+});
+
+test('evaluateScope: compatibility aborts the WHOLE scope on one unresolved non-user sender', () => {
+    // USER perspective, participation always TRUE, but "Ghost" resolves to no roster entry.
+    const s = scope('Tim', null, [inc('Rosa', 'hey'), inc('Ghost', 'boo')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+});
+
+test('evaluateScope: compatibility tolerates a decorated sender ("Blake 🐺") in a USER scope', () => {
+    const s = scope('Tim', null, [inc('Blake 🐺', 'hey')]);
+    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
 });
