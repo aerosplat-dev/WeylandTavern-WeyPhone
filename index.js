@@ -10,6 +10,8 @@ import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
 import { formatParticipantNames } from './lib/participants.js';
 import { parseReply, parseGroupReply } from './lib/messageParsing.js';
+import { locatePhoneBlock, stripPhoneBlock } from './lib/hijackParsing.js';
+import { shouldProcessHijackMessage, planHijackCapture } from './lib/hijackRouting.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
@@ -36,6 +38,11 @@ import { resolveSubbotPersonality } from './lib/subbotContent.js';
 // browser-only absolute path is safe here.
 import { ravs } from '/scripts/extensions/quick-reply-ext/src/rav.js';
 import { charPer } from '/scripts/extensions/quick-reply-ext/src/charper.js';
+// Core SillyTavern global (public/scripts/openai.js). Absolute browser path, same convention as the
+// quick-reply-ext imports above — never exercised by the Node test suite (index.js is browser-only).
+// Used only to force streaming off when Hijack is enabled (the parser needs a fully settled mes),
+// mirroring Weyland-Formatter's own precedent against this same shared global.
+import { oai_settings } from '/scripts/openai.js';
 // Not yet consumed by this task's own code — imported here per the Task 6 brief as the real
 // (non-mirror) subbot content source a later task (7/8) will read from when rendering an actual
 // subbot conversation. Kept as a plain import for now rather than adding a currently-dead call site.
@@ -104,6 +111,14 @@ let weyPhoneTetherExtensionPromptKeys = new Set();
 // (yet) present here, same as before this override existed.
 let castRosterPortraitSlugs = {};
 
+// Synchronously-readable snapshot of the FULL resolved roster (not just portrait slugs) — populated
+// the moment castRosterPromise resolves, same lifecycle as castRosterPortraitSlugs above. The
+// MESSAGE_RECEIVED hijack handler must be fully synchronous (it can't await, or Weyland-Formatter's
+// own later-registered handler could read chat[messageId].mes before the strip lands), so it reads
+// this snapshot instead of awaiting getCastRoster(). Empty until first resolution — a hijack-bearing
+// message arriving before the fetch completes is a graceful no-op (nothing resolves, block untouched).
+let castRosterEntries = [];
+
 /**
  * Fetches cast.weybooru.com's live character catalog and cross-references it against the Weyland
  * lorebook (via context.loadWorldInfo) and charPer.js (already imported in this file) to build the
@@ -150,6 +165,7 @@ function getCastRoster() {
             return [];
         }).then(roster => {
             for (const contact of roster) castRosterPortraitSlugs[contact.entryName] = contact.portraitSlug;
+            castRosterEntries = roster;
             return roster;
         });
     }
@@ -2119,6 +2135,7 @@ function initPanel() {
     const context = SillyTavern.getContext();
     context.eventSource.on(context.eventTypes.CHAT_CHANGED, updateTetheredToggleAvailability);
     context.eventSource.on(context.eventTypes.CHAT_CHANGED, refreshHomeScreenAvailability);
+    context.eventSource.on(context.eventTypes.MESSAGE_RECEIVED, weyPhoneHijackHandler);
 
     // Closes the Regenerate popup menu on any click outside it — the menu's own toggle/item
     // clicks are handled inside handleScreenBodyClick above and are excluded here since they
@@ -2176,6 +2193,21 @@ async function initExtensionSettingsPanel() {
     bidirectionalTetheringCheckbox.checked = settings.bidirectionalTetheringEnabled;
     bidirectionalTetheringCheckbox.addEventListener('input', () => {
         settings.bidirectionalTetheringEnabled = bidirectionalTetheringCheckbox.checked;
+        context.saveSettingsDebounced();
+    });
+
+    const hijackCheckbox = document.getElementById('wp-settings-hijack-checkbox');
+    hijackCheckbox.checked = settings.hijackEnabled;
+    hijackCheckbox.addEventListener('input', () => {
+        settings.hijackEnabled = hijackCheckbox.checked;
+        // One-time force ONLY when turning ON — the parser needs a fully settled chat[messageId].mes,
+        // so streaming must be off. Mirrors Weyland-Formatter's own force (its index.js ~line 686).
+        // Turning Hijack OFF touches nothing (no persistent snap-back listener — that's Formatter's
+        // separate mechanism, out of scope here).
+        if (settings.hijackEnabled) {
+            oai_settings.stream_openai = false;
+            $('#stream_toggle').prop('checked', false);
+        }
         context.saveSettingsDebounced();
     });
 
@@ -2253,6 +2285,66 @@ async function weyPhoneMainChatInterceptor() {
     }
 }
 globalThis.weyPhoneMainChatInterceptor = weyPhoneMainChatInterceptor;
+
+/**
+ * SillyTavern MESSAGE_RECEIVED handler (registered in initPanel). Fully synchronous by design: it
+ * must strip a captured phone block out of chat[messageId].mes BEFORE Weyland-Formatter's own
+ * later-registered MESSAGE_RECEIVED handler reads that same field (WeyPhone loading_order 150 <
+ * Formatter's 400). Reads the roster from the synchronous castRosterEntries snapshot (never awaits).
+ * Gated on BOTH experimental flags; skips user/system/no-text messages via shouldProcessHijackMessage.
+ * @param {number} messageId
+ */
+function weyPhoneHijackHandler(messageId) {
+    try {
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        if (!settings.hijackEnabled || !settings.bidirectionalTetheringEnabled) return;
+
+        const chat = context.chat;
+        const message = chat?.[messageId];
+        if (!shouldProcessHijackMessage(message)) return;
+
+        const block = locatePhoneBlock(message.mes);
+        if (!block) return;
+
+        const plan = planHijackCapture(block, castRosterEntries, settings);
+        if (!plan.captured) return;
+
+        let conversation = plan.existingConversationId
+            ? getConversation(settings, plan.existingConversationId)
+            : null;
+        if (!conversation) {
+            conversation = createConversation(settings, plan.participants);
+            // Brand-new hijacked threads start tethered so they round-trip into the roleplay on the
+            // very next generation without a manual step (the one case Hijack itself flips the flag).
+            setTetheredSettings(settings, conversation.id, { tethered: true });
+        }
+        for (const msg of plan.messages) {
+            appendMessage(settings, conversation.id, {
+                role: msg.role,
+                content: msg.content,
+                ...(msg.speaker ? { speaker: msg.speaker } : {}),
+                timestamp: genTimestamp(),
+            });
+        }
+
+        // Strip the captured block out of the roleplay message. No explicit save/re-render — mirrors
+        // Weyland-Formatter's own precedent (it mutates chat[messageId].mes with no saveChatConditional),
+        // relying on ST's native post-MESSAGE_RECEIVED render + autosave pipeline.
+        message.mes = stripPhoneBlock(message.mes, block);
+
+        // Generic unread accrual (see Task 5) — this thread is essentially never the open one, so it
+        // increments. Runs against the SUM-of-assistant-lines increment the plan computed.
+        accrueUnread(settings, conversation.id, plan.unreadIncrement);
+
+        context.saveSettingsDebounced();
+        refreshUnreadBadges();
+        refreshVisibleScreen();
+        toastr.info(`New message from ${formatParticipantNames(plan.participants)}`, 'WeyPhone');
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Hijack capture failed:`, error);
+    }
+}
 
 jQuery(async () => {
     initPanel();

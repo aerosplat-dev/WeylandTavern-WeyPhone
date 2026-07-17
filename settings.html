@@ -17,6 +17,12 @@
             </label>
             <small data-i18n="wpSettingsBidirectionalTetheringHint">When on, a tethered WeyPhone conversation's content also flows INTO the main roleplay chat's next reply (e.g. arranging to meet someone over text, then having the roleplay know about it) — off by default since this can affect the main roleplay's own history/behavior. Nothing is ever permanently written to your saved chat; turning this off (or untethering a conversation) removes its effect immediately.</small>
 
+            <label class="checkbox_label" for="wp-settings-hijack-checkbox" title="EXPERIMENTAL: capture a recognized character's texting block out of the main roleplay reply into a WeyPhone thread" data-i18n="[title]EXPERIMENTAL: capture a recognized character's texting block out of the main roleplay reply into a WeyPhone thread" style="margin-top: 10px;">
+                <input id="wp-settings-hijack-checkbox" type="checkbox">
+                <span data-i18n="EXPERIMENTAL: Hijack Incoming Texts">EXPERIMENTAL: Hijack Incoming Texts</span>
+            </label>
+            <small data-i18n="wpSettingsHijackHint">When on (and Bi-directional Tethering is also on), a character texting you inside a main roleplay reply is pulled out of that message and delivered as real WeyPhone messages in a thread with them — new threads start tethered so they round-trip back into the story. Requires Bi-directional Tethering; turning this on also disables streaming (the text must be fully settled to parse).</small>
+
             <div class="flex-container alignItemsBaseline" style="margin-top: 10px;">
                 <h4 class="margin0" data-i18n="Generation Connection">Generation Connection</h4>
                 <a href="https://docs.sillytavern.app/usage/core-concepts/connection-profiles" target="_blank" class="notes-link">
