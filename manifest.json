@@ -8,5 +8,6 @@
     "author": "weyland-tavern",
     "version": "1.0.0",
     "homePage": "https://github.com/SillyTavern/SillyTavern",
-    "auto_update": false
+    "auto_update": false,
+    "generate_interceptor": "weyPhoneMainChatInterceptor"
 }

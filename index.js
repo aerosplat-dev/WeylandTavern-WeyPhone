@@ -14,6 +14,7 @@ import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
 import { resolveMainChatAnchor } from './lib/mainChatAnchor.js';
+import { buildMainChatInjectionPlan } from './lib/mainChatInjection.js';
 import { PHONE_APP_PROMPTS } from './lib/phoneAppPrompts.js';
 import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
 import { parsePhoneAppOutput } from './lib/phoneAppFormatting.js';
@@ -72,6 +73,21 @@ const phoneAppGeneratingIds = new Set(); // tracks which app keys currently have
 // A Promise (not a plain array) so callers that run before the initial fetch resolves still get
 // the real result once it's ready, instead of racing ahead with an empty list.
 let castRosterPromise = null;
+
+// SillyTavern's own internal extension-prompt position enum (public/script.js's
+// extension_prompt_types) — not exposed as named constants on context, so mirrored here with the
+// same numeric values, confirmed against the real source during this feature's design.
+const EXTENSION_PROMPT_POSITION_IN_PROMPT = 0;
+const EXTENSION_PROMPT_POSITION_IN_CHAT = 1;
+const EXTENSION_PROMPT_POSITION_NONE = -1;
+const WEYPHONE_TETHER_CAUTION_KEY = 'weyphone_tether_caution';
+
+// Tracks which extension-prompt keys THIS interceptor set on the previous turn, so a key that's no
+// longer part of this turn's computed plan (e.g. a conversation was untethered, or its content was
+// summarized into a memory with a different anchor) gets explicitly cleared rather than lingering
+// with stale content indefinitely — extension_prompts is a plain global keyed by these strings and
+// nothing else clears them on our behalf between turns.
+let weyPhoneTetherExtensionPromptKeys = new Set();
 
 // Populated (keyed by entryName) as soon as castRosterPromise resolves — a synchronously-readable
 // snapshot for the many buildPortraitMap call sites below, which run synchronously inside render
@@ -2175,6 +2191,54 @@ async function initExtensionSettingsPanel() {
         log('Connection Manager not available for the WeyPhone settings panel:', error);
     }
 }
+
+/**
+ * SillyTavern's generic pre-generation hook (registered via manifest.json's generate_interceptor
+ * field, called automatically before every main-chat prompt assembly — see this feature's design
+ * doc for the confirmed mechanism). Computes the current bi-directional-tethering injection plan
+ * fresh from live settings state and calls context.setExtensionPrompt for the shared caution block
+ * plus each depth-positioned group. Ephemeral only: never touches context.chat, never saves
+ * anything — turning the experimental setting off, or simply reloading/switching the chat, makes
+ * all of this vanish completely.
+ */
+async function weyPhoneMainChatInterceptor() {
+    try {
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        if (!settings.bidirectionalTetheringEnabled) return;
+        if (!isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId })) return;
+
+        const tetheredConversations = Object.values(settings.conversations).filter(c => c.tethered);
+        const userName = context.name1 || 'User';
+        const plan = buildMainChatInjectionPlan({
+            tetheredConversations,
+            currentMainChatLength: context.chat?.length ?? 0,
+            userName,
+            formatClockTime,
+        });
+
+        const newKeys = new Set();
+        if (plan.cautionBlock) {
+            context.setExtensionPrompt(WEYPHONE_TETHER_CAUTION_KEY, plan.cautionBlock, EXTENSION_PROMPT_POSITION_IN_PROMPT, 0);
+            newKeys.add(WEYPHONE_TETHER_CAUTION_KEY);
+        } else if (weyPhoneTetherExtensionPromptKeys.has(WEYPHONE_TETHER_CAUTION_KEY)) {
+            context.setExtensionPrompt(WEYPHONE_TETHER_CAUTION_KEY, '', EXTENSION_PROMPT_POSITION_NONE, 0);
+        }
+        for (const group of plan.groups) {
+            context.setExtensionPrompt(group.key, group.content, EXTENSION_PROMPT_POSITION_IN_CHAT, group.depth);
+            newKeys.add(group.key);
+        }
+        for (const staleKey of weyPhoneTetherExtensionPromptKeys) {
+            if (!newKeys.has(staleKey)) {
+                context.setExtensionPrompt(staleKey, '', EXTENSION_PROMPT_POSITION_NONE, 0);
+            }
+        }
+        weyPhoneTetherExtensionPromptKeys = newKeys;
+    } catch (error) {
+        log('Bi-directional tether injection failed:', error);
+    }
+}
+globalThis.weyPhoneMainChatInterceptor = weyPhoneMainChatInterceptor;
 
 jQuery(async () => {
     initPanel();
