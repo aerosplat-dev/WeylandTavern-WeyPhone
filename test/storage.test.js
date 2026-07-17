@@ -272,6 +272,20 @@ test('createMemory returns undefined for an unknown conversation id', () => {
     assert.equal(createMemory(settings, 'nonexistent', 'text'), undefined);
 });
 
+test('createMemory defaults mainChatAnchor to null', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, ['Blake']);
+    const memory = createMemory(settings, conversation.id, 'text');
+    assert.equal(memory.mainChatAnchor, null);
+});
+
+test('createMemory stores an explicit mainChatAnchor when given one', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, ['Blake']);
+    const memory = createMemory(settings, conversation.id, 'text', { mainChatAnchor: 7 });
+    assert.equal(memory.mainChatAnchor, 7);
+});
+
 test('editMemory updates a memory\'s content in place', () => {
     const settings = { conversations: {} };
     const conversation = createConversation(settings, ['Rosa']);

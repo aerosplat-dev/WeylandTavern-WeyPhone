@@ -13,6 +13,7 @@ import { parseReply, parseGroupReply } from './lib/messageParsing.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
+import { resolveMainChatAnchor } from './lib/mainChatAnchor.js';
 import { PHONE_APP_PROMPTS } from './lib/phoneAppPrompts.js';
 import { getPhoneAppContent, setPhoneAppContent } from './lib/phoneApps.js';
 import { parsePhoneAppOutput } from './lib/phoneAppFormatting.js';
@@ -845,6 +846,12 @@ async function generateMemory(conversationId, conversation, context, settings, o
             } else {
                 createMemory(settings, conversationId, memoryText.trim(), {
                     sourceRange: { from: window.start, to: window.end },
+                    mainChatAnchor: resolveMainChatAnchor({
+                        bidirectionalTetheringEnabled: settings.bidirectionalTetheringEnabled,
+                        characterId: context.characterId,
+                        groupId: context.groupId,
+                        chatLength: context.chat?.length,
+                    }),
                 });
                 conversation.lastMemoryMessageIndex = window.end;
             }
@@ -1012,6 +1019,12 @@ async function generateReply(conversationId, conversation, context, settings) {
         });
 
         const replyText = extractResponseText(result);
+        const mainChatAnchor = resolveMainChatAnchor({
+            bidirectionalTetheringEnabled: settings.bidirectionalTetheringEnabled,
+            characterId: context.characterId,
+            groupId: context.groupId,
+            chatLength: context.chat?.length,
+        });
         if (isGroup) {
             // Shares parseReply's own analysis-stripping/footer-stripping/fallback logic via
             // parseGroupReply, which additionally preserves each Incoming¦ line's speaker name
@@ -1030,6 +1043,7 @@ async function generateReply(conversationId, conversation, context, settings) {
                     content,
                     speaker: speaker ?? entryNameForMacros,
                     timestamp: genTimestamp(),
+                    mainChatAnchor,
                 });
             }
         } else {
@@ -1038,7 +1052,7 @@ async function generateReply(conversationId, conversation, context, settings) {
                 throw new Error('The model did not return any usable content.');
             }
             for (const messageText of parsed.messages) {
-                appendMessage(settings, conversationId, { role: 'assistant', content: messageText, timestamp: genTimestamp() });
+                appendMessage(settings, conversationId, { role: 'assistant', content: messageText, timestamp: genTimestamp(), mainChatAnchor });
             }
         }
         rerenderIfStillViewing(conversationId, conversation.messages);
@@ -1073,7 +1087,13 @@ async function handleSend() {
     if (!conversation) return;
 
     input.value = '';
-    appendMessage(settings, conversationId, { role: 'user', content: userMessage, timestamp: genTimestamp() });
+    const mainChatAnchor = resolveMainChatAnchor({
+        bidirectionalTetheringEnabled: settings.bidirectionalTetheringEnabled,
+        characterId: context.characterId,
+        groupId: context.groupId,
+        chatLength: context.chat?.length,
+    });
+    appendMessage(settings, conversationId, { role: 'user', content: userMessage, timestamp: genTimestamp(), mainChatAnchor });
     editingMessageIndex = -1;
     rerenderIfStillViewing(conversationId, conversation.messages);
 
@@ -1167,7 +1187,16 @@ function handleAddMemory() {
     if (!textarea || !currentConversationId) return;
     const content = textarea.value.trim();
     if (!content) return;
-    createMemory(settings, currentConversationId, content, { pinned: true, sourceRange: null });
+    createMemory(settings, currentConversationId, content, {
+        pinned: true,
+        sourceRange: null,
+        mainChatAnchor: resolveMainChatAnchor({
+            bidirectionalTetheringEnabled: settings.bidirectionalTetheringEnabled,
+            characterId: context.characterId,
+            groupId: context.groupId,
+            chatLength: context.chat?.length,
+        }),
+    });
     context.saveSettingsDebounced();
     rerenderMemoryScreen();
 }
