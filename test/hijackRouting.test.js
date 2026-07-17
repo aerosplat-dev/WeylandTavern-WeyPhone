@@ -1,22 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveHijackSpeaker, shouldProcessHijackMessage, planHijackCapture } from '../lib/hijackRouting.js';
+import { resolveHijackSpeaker, resolveUserReference, shouldProcessHijackMessage, planHijackCapture } from '../lib/hijackRouting.js';
 
 const ROSTER = [
     { entryName: 'Rosa', fullName: 'Rosa Vermillion', hasFullBot: true, hasSubbot: true },
     { entryName: 'Belle', fullName: 'Belle Cadence', hasFullBot: true, hasSubbot: true },
+    { entryName: 'Blake', fullName: 'Blake Wolfe', hasFullBot: true, hasSubbot: true },
 ];
 
-test('resolveHijackSpeaker matches case-insensitively and returns the canonical entryName', () => {
+test('resolveHijackSpeaker matches a bare entryName case-insensitively (canonical casing returned)', () => {
     assert.equal(resolveHijackSpeaker('rosa', ROSTER), 'Rosa');
     assert.equal(resolveHijackSpeaker('ROSA', ROSTER), 'Rosa');
     assert.equal(resolveHijackSpeaker('  Belle  ', ROSTER), 'Belle');
+});
+
+test('resolveHijackSpeaker matches when the known name is a SUBSTRING of a decorated sender', () => {
+    assert.equal(resolveHijackSpeaker('Blake 🐺', ROSTER), 'Blake');
+    assert.equal(resolveHijackSpeaker('~Rosa~', ROSTER), 'Rosa');
+});
+
+test('resolveHijackSpeaker matches a fullName token (first or last name)', () => {
+    assert.equal(resolveHijackSpeaker('Vermillion', ROSTER), 'Rosa'); // Rosa Vermillion
+    assert.equal(resolveHijackSpeaker('Cadence', ROSTER), 'Belle');   // Belle Cadence
+});
+
+test('resolveHijackSpeaker matches a per-character custom nickname when supplied', () => {
+    assert.equal(resolveHijackSpeaker('wolfy', ROSTER, { Blake: 'wolfy' }), 'Blake');
+    assert.equal(resolveHijackSpeaker('lil wolfy here', ROSTER, { Blake: 'wolfy' }), 'Blake');
 });
 
 test('resolveHijackSpeaker returns null for an unrecognized or empty name', () => {
     assert.equal(resolveHijackSpeaker('Nobody', ROSTER), null);
     assert.equal(resolveHijackSpeaker('', ROSTER), null);
     assert.equal(resolveHijackSpeaker(null, ROSTER), null);
+});
+
+test('resolveUserReference matches the user name and any user nickname (substring, case-insensitive)', () => {
+    assert.equal(resolveUserReference('Tim', 'Tim', ['juicebox']), true);
+    assert.equal(resolveUserReference('hey it is juicebox', 'Tim', ['juicebox']), true);
+    assert.equal(resolveUserReference('POOKIE', 'Tim', ['pookie']), true);
+    assert.equal(resolveUserReference('Rosa', 'Tim', ['juicebox']), false);
+    assert.equal(resolveUserReference('', 'Tim', ['juicebox']), false);
+    assert.equal(resolveUserReference('Tim', '', []), false); // no user name, no nicknames
 });
 
 test('shouldProcessHijackMessage accepts a normal assistant message', () => {
