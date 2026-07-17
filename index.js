@@ -10,8 +10,8 @@ import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
 import { formatParticipantNames } from './lib/participants.js';
 import { parseReply, parseGroupReply } from './lib/messageParsing.js';
-import { locatePhoneBlock, stripPhoneBlock } from './lib/hijackParsing.js';
-import { shouldProcessHijackMessage, planHijackCapture } from './lib/hijackRouting.js';
+import { locatePhoneScopes, stripPhoneScopes } from './lib/hijackParsing.js';
+import { shouldProcessHijackMessage, evaluateScope, planScopeCapture } from './lib/hijackRouting.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
@@ -2517,43 +2517,60 @@ function weyPhoneHijackHandler(messageId) {
         const message = chat?.[messageId];
         if (!shouldProcessHijackMessage(message)) return;
 
-        const block = locatePhoneBlock(message.mes);
-        if (!block) return;
+        const scopes = locatePhoneScopes(message.mes);
+        if (!scopes.length) return;
 
-        const plan = planHijackCapture(block, castRosterEntries, settings);
-        if (!plan.captured) return;
+        const ctx = {
+            userName: context.name1 || 'User',
+            userNicknames: settings.userNicknames,
+            castRoster: castRosterEntries,
+            characterNicknames: settings.characterNicknames,
+        };
 
-        let conversation = plan.existingConversationId
-            ? getConversation(settings, plan.existingConversationId)
-            : null;
-        if (!conversation) {
-            conversation = createConversation(settings, plan.participants);
-            // Brand-new hijacked threads start tethered so they round-trip into the roleplay on the
-            // very next generation without a manual step (the one case Hijack itself flips the flag).
-            setTetheredSettings(settings, conversation.id, { tethered: true });
+        // Each scope is evaluated, routed, and captured/skipped completely independently.
+        const capturedScopes = [];
+        const toastParticipantSets = [];
+        for (const scope of scopes) {
+            const decision = evaluateScope(scope, ctx);
+            if (!decision.captured) continue;
+            const plan = planScopeCapture(scope, decision, ctx, settings);
+            if (!plan.captured) continue;
+
+            let conversation = plan.existingConversationId
+                ? getConversation(settings, plan.existingConversationId)
+                : null;
+            if (!conversation) {
+                conversation = createConversation(settings, plan.participants);
+                // Brand-new hijacked threads start tethered so they round-trip into the roleplay on
+                // the very next generation without a manual step.
+                setTetheredSettings(settings, conversation.id, { tethered: true });
+            }
+            for (const msg of plan.messages) {
+                appendMessage(settings, conversation.id, {
+                    role: msg.role,
+                    content: msg.content,
+                    ...(msg.speaker ? { speaker: msg.speaker } : {}),
+                    timestamp: genTimestamp(),
+                });
+            }
+            accrueUnread(settings, conversation.id, plan.unreadIncrement);
+            capturedScopes.push(scope);
+            toastParticipantSets.push(plan.participants);
         }
-        for (const msg of plan.messages) {
-            appendMessage(settings, conversation.id, {
-                role: msg.role,
-                content: msg.content,
-                ...(msg.speaker ? { speaker: msg.speaker } : {}),
-                timestamp: genTimestamp(),
-            });
-        }
 
-        // Strip the captured block out of the roleplay message. No explicit save/re-render — mirrors
-        // Weyland-Formatter's own precedent (it mutates chat[messageId].mes with no saveChatConditional),
-        // relying on ST's native post-MESSAGE_RECEIVED render + autosave pipeline.
-        message.mes = stripPhoneBlock(message.mes, block);
+        if (!capturedScopes.length) return;
 
-        // Generic unread accrual (see Task 5) — this thread is essentially never the open one, so it
-        // increments. Runs against the SUM-of-assistant-lines increment the plan computed.
-        accrueUnread(settings, conversation.id, plan.unreadIncrement);
+        // Strip only the captured scopes' lines out of the roleplay message. Uncaptured scopes and
+        // narrative are left untouched. No explicit save/re-render of chat — mirrors
+        // Weyland-Formatter's precedent (relies on ST's native post-MESSAGE_RECEIVED pipeline).
+        message.mes = stripPhoneScopes(message.mes, capturedScopes);
 
         context.saveSettingsDebounced();
         refreshUnreadBadges();
         refreshVisibleScreen();
-        toastr.info(`New message from ${formatParticipantNames(plan.participants)}`, 'WeyPhone');
+        for (const participants of toastParticipantSets) {
+            toastr.info(`New message from ${formatParticipantNames(participants)}`, 'WeyPhone');
+        }
     } catch (error) {
         console.error(`[${MODULE_NAME}] Hijack capture failed:`, error);
     }
