@@ -26,7 +26,7 @@ import { WEYLAND_ROSTER, TWITTER_ONLY_ROSTER } from './lib/weylandRoster.js';
 import { buildTwitterPrompt } from './lib/twitterPrompts.js';
 import { buildCastRoster } from './lib/castRoster.js';
 import { resolveSubbotPersonality } from './lib/subbotContent.js';
-import { parseNicknameTags, validateNicknamePools } from './lib/nicknames.js';
+import { parseNicknameTags, validateNicknamePools, BUILT_IN_USER_NICKNAMES } from './lib/nicknames.js';
 // Root-relative (leading "/"), NOT relative to this file's own location — quick-reply-ext is a
 // bundled core-adjacent extension that always lives at this fixed, SillyTavern-convention-dictated
 // URL (public/scripts/extensions/quick-reply-ext/), regardless of where WeyPhone itself is
@@ -2357,14 +2357,18 @@ function renderNicknameConfigFrame() {
             chip.className = 'wp-nick-chip';
             const label = document.createElement('span');
             label.textContent = name;
-            const remove = document.createElement('button');
-            remove.type = 'button';
-            remove.textContent = '×';
-            remove.addEventListener('click', () => {
-                userNicknames = userNicknames.filter(n => n !== name);
-                renderChips();
-            });
-            chip.append(label, remove);
+            chip.append(label);
+            const isBuiltIn = BUILT_IN_USER_NICKNAMES.some(builtIn => builtIn.toLowerCase() === name.toLowerCase());
+            if (!isBuiltIn) {
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.textContent = '×';
+                remove.addEventListener('click', () => {
+                    userNicknames = userNicknames.filter(n => n !== name);
+                    renderChips();
+                });
+                chip.append(remove);
+            }
             chips.insertBefore(chip, chipInput);
         }
     };
