@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveHijackSpeaker, resolveUserReference, evaluateScope, shouldProcessHijackMessage, planHijackCapture } from '../lib/hijackRouting.js';
+import { resolveHijackSpeaker, resolveUserReference, evaluateScope, dedupeRecap, planScopeCapture, shouldProcessHijackMessage } from '../lib/hijackRouting.js';
 
 const ROSTER = [
     { entryName: 'Rosa', fullName: 'Rosa Vermillion', hasFullBot: true, hasSubbot: true },
@@ -53,79 +53,6 @@ test('shouldProcessHijackMessage rejects user, system, missing, and no-text mess
     assert.equal(shouldProcessHijackMessage({ is_system: true, mes: 'hi' }), false);
     assert.equal(shouldProcessHijackMessage(undefined), false);
     assert.equal(shouldProcessHijackMessage({ mes: 42 }), false);
-});
-
-test('planHijackCapture: solo block with an existing thread appends there (no speaker on solo)', () => {
-    const settings = { conversations: {
-        c1: { id: 'c1', participants: ['Rosa'], messages: [], lastActive: 5 },
-    } };
-    const block = { lines: [
-        { role: 'assistant', speaker: 'Rosa', text: 'hey' },
-        { role: 'user', text: 'on my way' },
-    ] };
-    const plan = planHijackCapture(block, ROSTER, settings);
-    assert.equal(plan.captured, true);
-    assert.deepEqual(plan.participants, ['Rosa']);
-    assert.equal(plan.existingConversationId, 'c1');
-    assert.deepEqual(plan.messages, [
-        { role: 'assistant', content: 'hey' },
-        { role: 'user', content: 'on my way' },
-    ]);
-    assert.equal(plan.unreadIncrement, 1);
-});
-
-test('planHijackCapture: solo block with no existing thread signals new-thread-needed', () => {
-    const settings = { conversations: {} };
-    const block = { lines: [{ role: 'assistant', speaker: 'Rosa', text: 'hey' }] };
-    const plan = planHijackCapture(block, ROSTER, settings);
-    assert.equal(plan.captured, true);
-    assert.deepEqual(plan.participants, ['Rosa']);
-    assert.equal(plan.existingConversationId, null);
-    assert.equal(plan.unreadIncrement, 1);
-});
-
-test('planHijackCapture: group block stores canonical entryName as each assistant speaker', () => {
-    const settings = { conversations: {} };
-    const block = { lines: [
-        { role: 'assistant', speaker: 'rosa', text: 'hey' },
-        { role: 'assistant', speaker: 'BELLE', text: 'hi' },
-        { role: 'user', text: 'coming' },
-    ] };
-    const plan = planHijackCapture(block, ROSTER, settings);
-    assert.equal(plan.captured, true);
-    assert.deepEqual(plan.participants, ['Rosa', 'Belle']);
-    assert.deepEqual(plan.messages, [
-        { role: 'assistant', content: 'hey', speaker: 'Rosa' },
-        { role: 'assistant', content: 'hi', speaker: 'Belle' },
-        { role: 'user', content: 'coming' },
-    ]);
-    assert.equal(plan.unreadIncrement, 2);
-});
-
-test('planHijackCapture: all-or-nothing — any unresolved incoming speaker aborts the whole block', () => {
-    const settings = { conversations: {} };
-    const block = { lines: [
-        { role: 'assistant', speaker: 'Rosa', text: 'hey' },
-        { role: 'assistant', speaker: 'Stranger', text: 'who am I' },
-    ] };
-    assert.deepEqual(planHijackCapture(block, ROSTER, settings), { captured: false });
-});
-
-test('planHijackCapture: a block with no incoming (assistant) lines is not captured', () => {
-    const settings = { conversations: {} };
-    const block = { lines: [{ role: 'user', text: 'anyone there?' }] };
-    assert.deepEqual(planHijackCapture(block, ROSTER, settings), { captured: false });
-});
-
-test('planHijackCapture: empty-text lines are dropped from the appended messages', () => {
-    const settings = { conversations: {} };
-    const block = { lines: [
-        { role: 'assistant', speaker: 'Rosa', text: 'hey' },
-        { role: 'assistant', speaker: 'Rosa', text: '' },
-    ] };
-    const plan = planHijackCapture(block, ROSTER, settings);
-    assert.deepEqual(plan.messages, [{ role: 'assistant', content: 'hey' }]);
-    assert.equal(plan.unreadIncrement, 1);
 });
 
 const CTX = { userName: 'Tim', userNicknames: ['juicebox'], castRoster: ROSTER, characterNicknames: {} };
@@ -199,4 +126,127 @@ test('evaluateScope: compatibility aborts the WHOLE scope on one unresolved non-
 test('evaluateScope: compatibility tolerates a decorated sender ("Blake 🐺") in a USER scope', () => {
     const s = scope('Tim', null, [inc('Blake 🐺', 'hey')]);
     assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
+});
+
+// Decisions produced by evaluateScope, hand-built here so planScopeCapture is tested in isolation.
+const USER = { captured: true, perspective: 'USER', ownerEntryName: null };
+const CHAR = owner => ({ captured: true, perspective: 'CHAR', ownerEntryName: owner });
+
+test('dedupeRecap: drops a matching prefix that overlaps the stored tail', () => {
+    const stored = [{ role: 'assistant', content: 'a' }, { role: 'user', content: 'b' }];
+    const incoming = [{ role: 'user', content: 'b' }, { role: 'assistant', content: 'c' }];
+    assert.deepEqual(dedupeRecap(incoming, stored), [{ role: 'assistant', content: 'c' }]);
+});
+
+test('dedupeRecap: full overlap leaves nothing', () => {
+    const stored = [{ role: 'assistant', content: 'a' }, { role: 'user', content: 'b' }];
+    const incoming = [{ role: 'assistant', content: 'a' }, { role: 'user', content: 'b' }];
+    assert.deepEqual(dedupeRecap(incoming, stored), []);
+});
+
+test('dedupeRecap: no overlap keeps everything', () => {
+    const stored = [{ role: 'assistant', content: 'a' }];
+    const incoming = [{ role: 'user', content: 'x' }, { role: 'assistant', content: 'y' }];
+    assert.deepEqual(dedupeRecap(incoming, stored), incoming);
+});
+
+test('dedupeRecap: matches only a PREFIX (a later coincidental match is not dropped)', () => {
+    const stored = [{ role: 'user', content: 'b' }];
+    const incoming = [{ role: 'assistant', content: 'a' }, { role: 'user', content: 'b' }];
+    assert.deepEqual(dedupeRecap(incoming, stored), incoming); // 'a' first breaks the prefix
+});
+
+test('planScopeCapture: USER solo scope, existing thread appends there, no speaker', () => {
+    const settings = { conversations: { c1: { id: 'c1', participants: ['Rosa'], messages: [], lastActive: 5 } } };
+    const s = scope('Tim', null, [inc('Rosa', 'hey'), out('Tim', 'on my way')]);
+    const plan = planScopeCapture(s, USER, CTX, settings);
+    assert.equal(plan.captured, true);
+    assert.deepEqual(plan.participants, ['Rosa']);
+    assert.equal(plan.existingConversationId, 'c1');
+    assert.deepEqual(plan.messages, [
+        { role: 'assistant', content: 'hey' },
+        { role: 'user', content: 'on my way' },
+    ]);
+    assert.equal(plan.unreadIncrement, 1);
+});
+
+test('planScopeCapture: USER solo scope, no existing thread signals new-thread-needed', () => {
+    const settings = { conversations: {} };
+    const s = scope(null, null, [inc('Rosa', 'hey')]);
+    const plan = planScopeCapture(s, USER, CTX, settings);
+    assert.equal(plan.captured, true);
+    assert.deepEqual(plan.participants, ['Rosa']);
+    assert.equal(plan.existingConversationId, null);
+    assert.equal(plan.unreadIncrement, 1);
+});
+
+test('planScopeCapture: USER group scope stores canonical entryName as each assistant speaker', () => {
+    const settings = { conversations: {} };
+    const s = scope('Tim', null, [inc('rosa', 'hey'), inc('BELLE', 'hi'), out('Tim', 'coming')]);
+    const plan = planScopeCapture(s, USER, CTX, settings);
+    assert.deepEqual(plan.participants, ['Rosa', 'Belle']);
+    assert.deepEqual(plan.messages, [
+        { role: 'assistant', content: 'hey', speaker: 'Rosa' },
+        { role: 'assistant', content: 'hi', speaker: 'Belle' },
+        { role: 'user', content: 'coming' },
+    ]);
+    assert.equal(plan.unreadIncrement, 2);
+});
+
+test('planScopeCapture: CHAR solo scope TRANSPOSES — Outgoing->assistant(owner), Incoming(user)->user', () => {
+    const settings = { conversations: {} };
+    // Blake's phone: Tim texts in (Incoming), Blake replies (Outgoing).
+    const s = scope('Blake', null, [inc('Tim', 'you up?'), out('Blake', 'yeah')]);
+    const plan = planScopeCapture(s, CHAR('Blake'), CTX, settings);
+    assert.deepEqual(plan.participants, ['Blake']);
+    assert.deepEqual(plan.messages, [
+        { role: 'user', content: 'you up?' },
+        { role: 'assistant', content: 'yeah' }, // solo -> no speaker
+    ]);
+    assert.equal(plan.unreadIncrement, 1);
+});
+
+test('planScopeCapture: CHAR group scope folds a non-user Incoming sender in as an assistant speaker', () => {
+    const settings = { conversations: {} };
+    // Blake's phone: Rosa (another char) texts in, Tim (user) texts in, Blake replies.
+    const s = scope('Blake', null, [inc('Rosa', 'party?'), inc('Tim', 'in'), out('Blake', 'yeah come')]);
+    const plan = planScopeCapture(s, CHAR('Blake'), CTX, settings);
+    assert.deepEqual(plan.participants, ['Rosa', 'Blake']);
+    assert.deepEqual(plan.messages, [
+        { role: 'assistant', content: 'party?', speaker: 'Rosa' }, // non-user incoming -> assistant
+        { role: 'user', content: 'in' },                          // user incoming -> user
+        { role: 'assistant', content: 'yeah come', speaker: 'Blake' },
+    ]);
+    assert.equal(plan.unreadIncrement, 2);
+});
+
+test('planScopeCapture: recap-dedup drops the overlapping prefix before appending', () => {
+    const settings = { conversations: { c1: {
+        id: 'c1', participants: ['Rosa'], lastActive: 5,
+        messages: [{ role: 'assistant', content: 'hey' }, { role: 'user', content: 'hi Rosa' }],
+    } } };
+    // Reconstructed messages: Outgoing 'hi Rosa' -> user 'hi Rosa' (matches the stored tail's last
+    // user message by role+content and dedupes away); Incoming 'you free?' -> assistant (survives).
+    const s = scope('Tim', null, [out('Tim', 'hi Rosa'), inc('Rosa', 'you free?')]);
+    const plan = planScopeCapture(s, USER, CTX, settings);
+    assert.deepEqual(plan.messages, [{ role: 'assistant', content: 'you free?' }]);
+    assert.equal(plan.existingConversationId, 'c1');
+    assert.equal(plan.unreadIncrement, 1);
+});
+
+test('planScopeCapture: a scope that dedupes to nothing is NOT captured', () => {
+    const settings = { conversations: { c1: {
+        id: 'c1', participants: ['Rosa'], lastActive: 5,
+        messages: [{ role: 'assistant', content: 'hey' }],
+    } } };
+    const s = scope('Tim', null, [inc('Rosa', 'hey')]); // reconstructs to [assistant 'hey'] == stored tail
+    assert.deepEqual(planScopeCapture(s, USER, CTX, settings), { captured: false });
+});
+
+test('planScopeCapture: empty-text lines are dropped from the messages', () => {
+    const settings = { conversations: {} };
+    const s = scope('Tim', null, [inc('Rosa', 'hey'), inc('Rosa', '   ')]);
+    const plan = planScopeCapture(s, USER, CTX, settings);
+    assert.deepEqual(plan.messages, [{ role: 'assistant', content: 'hey' }]);
+    assert.equal(plan.unreadIncrement, 1);
 });
