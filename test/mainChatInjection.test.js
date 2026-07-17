@@ -1,0 +1,185 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+    selectInjectableContent,
+    anchorToDepth,
+    groupInjectableItemsByAnchor,
+    buildMainChatInjectionPlan,
+    TETHER_CAUTION_BLOCK,
+} from '../lib/mainChatInjection.js';
+
+function formatClockTime(epochMs) {
+    return `T${epochMs}`;
+}
+
+test('selectInjectableContent returns pinned memories and messages since lastMemoryMessageIndex', () => {
+    const conversation = {
+        memories: [
+            { id: 'm1', content: 'pinned one', pinned: true, mainChatAnchor: 2 },
+            { id: 'm2', content: 'unpinned one', pinned: false, mainChatAnchor: 3 },
+        ],
+        messages: [
+            { role: 'user', content: 'old', mainChatAnchor: 1 },
+            { role: 'assistant', content: 'recent one', mainChatAnchor: 5 },
+            { role: 'user', content: 'recent two', mainChatAnchor: 6 },
+        ],
+        lastMemoryMessageIndex: 1,
+    };
+    const { pinnedMemories, recentMessages } = selectInjectableContent(conversation);
+    assert.deepEqual(pinnedMemories.map(m => m.id), ['m1']);
+    assert.deepEqual(recentMessages.map(m => m.content), ['recent one', 'recent two']);
+});
+
+test('selectInjectableContent defaults lastMemoryMessageIndex to 0 when absent', () => {
+    const conversation = {
+        memories: [],
+        messages: [{ role: 'user', content: 'a', mainChatAnchor: 1 }],
+    };
+    const { recentMessages } = selectInjectableContent(conversation);
+    assert.deepEqual(recentMessages.map(m => m.content), ['a']);
+});
+
+test('anchorToDepth converts an anchor into messages-back-from-the-end', () => {
+    assert.equal(anchorToDepth(10, 15), 5);
+});
+
+test('anchorToDepth clamps at 0 when the anchor is not older than the current chat length', () => {
+    assert.equal(anchorToDepth(15, 15), 0);
+    assert.equal(anchorToDepth(20, 15), 0);
+});
+
+test('anchorToDepth returns 0 for a null (unanchored) anchor', () => {
+    assert.equal(anchorToDepth(null, 15), 0);
+});
+
+test('groupInjectableItemsByAnchor groups a single conversation\'s items by anchor value', () => {
+    const conversation = {
+        id: 'conv1',
+        participants: ['Blake'],
+        memories: [{ id: 'm1', content: 'summary', pinned: true, mainChatAnchor: 2 }],
+        messages: [
+            { role: 'assistant', content: 'hey', mainChatAnchor: 5 },
+            { role: 'user', content: 'hi', mainChatAnchor: 5 },
+            { role: 'assistant', content: 'later', mainChatAnchor: 9 },
+        ],
+        lastMemoryMessageIndex: 0,
+    };
+    const groups = groupInjectableItemsByAnchor([conversation]);
+    assert.equal(groups.length, 3);
+    const byAnchor = Object.fromEntries(groups.map(g => [g.anchor, g]));
+    assert.equal(byAnchor[2].memories.length, 1);
+    assert.equal(byAnchor[5].messages.length, 2);
+    assert.equal(byAnchor[9].messages.length, 1);
+    assert.deepEqual(byAnchor[5].participants, ['Blake']);
+});
+
+test('groupInjectableItemsByAnchor keeps two different conversations that share an anchor as separate groups', () => {
+    const convA = {
+        id: 'convA', participants: ['Blake'], lastMemoryMessageIndex: 0, memories: [],
+        messages: [{ role: 'user', content: 'a', mainChatAnchor: 4 }],
+    };
+    const convB = {
+        id: 'convB', participants: ['Rosa'], lastMemoryMessageIndex: 0, memories: [],
+        messages: [{ role: 'user', content: 'b', mainChatAnchor: 4 }],
+    };
+    const groups = groupInjectableItemsByAnchor([convA, convB]);
+    assert.equal(groups.length, 2);
+    const convIds = groups.map(g => g.conversationId).sort();
+    assert.deepEqual(convIds, ['convA', 'convB']);
+});
+
+test('groupInjectableItemsByAnchor buckets unanchored (null mainChatAnchor) items together per conversation', () => {
+    const conversation = {
+        id: 'conv1', participants: ['Blake'], lastMemoryMessageIndex: 0, memories: [],
+        messages: [
+            { role: 'user', content: 'a', mainChatAnchor: null },
+            { role: 'assistant', content: 'b' },
+        ],
+    };
+    const groups = groupInjectableItemsByAnchor([conversation]);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].anchor, null);
+    assert.equal(groups[0].messages.length, 2);
+});
+
+test('buildMainChatInjectionPlan returns no caution block and no groups when nothing is injectable', () => {
+    const plan = buildMainChatInjectionPlan({ tetheredConversations: [], currentMainChatLength: 10, userName: 'User', formatClockTime });
+    assert.equal(plan.cautionBlock, null);
+    assert.deepEqual(plan.groups, []);
+});
+
+test('buildMainChatInjectionPlan builds one keyed, depth-positioned block per group plus the shared caution', () => {
+    const conversation = {
+        id: 'conv1', participants: ['Blake'], lastMemoryMessageIndex: 0,
+        memories: [],
+        messages: [
+            { role: 'user', content: 'meet me at the Black Barrel', mainChatAnchor: 8, timestamp: 1000 },
+            { role: 'assistant', content: 'see you there', speaker: 'Blake', mainChatAnchor: 8, timestamp: 2000 },
+        ],
+    };
+    const plan = buildMainChatInjectionPlan({
+        tetheredConversations: [conversation],
+        currentMainChatLength: 12,
+        userName: 'Alex',
+        formatClockTime,
+    });
+    assert.equal(plan.cautionBlock, TETHER_CAUTION_BLOCK);
+    assert.equal(plan.groups.length, 1);
+    const group = plan.groups[0];
+    assert.equal(group.depth, 4);
+    assert.equal(group.key, 'weyphone_tether_conv1_8');
+    assert.match(group.content, /\[TEXT MESSAGES — Blake\]/);
+    assert.match(group.content, /Black Barrel/);
+    assert.match(group.content, /\[END TEXT MESSAGES\]/);
+});
+
+test('buildMainChatInjectionPlan uses "unanchored" in the key for a null-anchor group', () => {
+    const conversation = {
+        id: 'conv1', participants: ['Blake'], lastMemoryMessageIndex: 0, memories: [],
+        messages: [{ role: 'user', content: 'hi', mainChatAnchor: null, timestamp: 1000 }],
+    };
+    const plan = buildMainChatInjectionPlan({
+        tetheredConversations: [conversation],
+        currentMainChatLength: 5,
+        userName: 'Alex',
+        formatClockTime,
+    });
+    assert.equal(plan.groups[0].key, 'weyphone_tether_conv1_unanchored');
+    assert.equal(plan.groups[0].depth, 0);
+});
+
+test('buildMainChatInjectionPlan tags a memory-derived line distinctly from raw messages', () => {
+    const conversation = {
+        id: 'conv1', participants: ['Blake'], lastMemoryMessageIndex: 5,
+        memories: [{ id: 'm1', content: 'They agreed to meet up later.', pinned: true, mainChatAnchor: 3 }],
+        messages: [],
+    };
+    const plan = buildMainChatInjectionPlan({
+        tetheredConversations: [conversation],
+        currentMainChatLength: 10,
+        userName: 'Alex',
+        formatClockTime,
+    });
+    assert.match(plan.groups[0].content, /a memory of an earlier exchange.*They agreed to meet up later\./);
+});
+
+test('buildMainChatInjectionPlan interleaves two threads with different anchors into separate, correctly-depth-ordered groups', () => {
+    const convA = {
+        id: 'convA', participants: ['Blake'], lastMemoryMessageIndex: 0, memories: [],
+        messages: [{ role: 'user', content: 'early text', mainChatAnchor: 2, timestamp: 1 }],
+    };
+    const convB = {
+        id: 'convB', participants: ['Rosa'], lastMemoryMessageIndex: 0, memories: [],
+        messages: [{ role: 'user', content: 'later text', mainChatAnchor: 9, timestamp: 2 }],
+    };
+    const plan = buildMainChatInjectionPlan({
+        tetheredConversations: [convA, convB],
+        currentMainChatLength: 10,
+        userName: 'Alex',
+        formatClockTime,
+    });
+    assert.equal(plan.groups.length, 2);
+    const byKey = Object.fromEntries(plan.groups.map(g => [g.key, g]));
+    assert.equal(byKey['weyphone_tether_convA_2'].depth, 8);
+    assert.equal(byKey['weyphone_tether_convB_9'].depth, 1);
+});
