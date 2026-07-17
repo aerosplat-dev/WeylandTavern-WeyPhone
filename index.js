@@ -80,6 +80,14 @@ let castRosterPromise = null;
 const EXTENSION_PROMPT_POSITION_IN_PROMPT = 0;
 const EXTENSION_PROMPT_POSITION_IN_CHAT = 1;
 const EXTENSION_PROMPT_POSITION_NONE = -1;
+// SillyTavern's own internal extension-prompt role enum (public/script.js's extension_prompt_roles)
+// — same rationale as the position constants above: mirrored here since it's not exposed as named
+// constants on context. SYSTEM stays the caution block's role (it lives in the persistent,
+// already-trusted system-prompt-adjacent slot); USER is for each group's actual texted content, so
+// it reads as {{user}} casually relaying something rather than a foreign mid-conversation system
+// intrusion — see this feature's injection-framing-fix design doc.
+const EXTENSION_PROMPT_ROLE_SYSTEM = 0;
+const EXTENSION_PROMPT_ROLE_USER = 1;
 const WEYPHONE_TETHER_CAUTION_KEY = 'weyphone_tether_caution';
 
 // Tracks which extension-prompt keys THIS interceptor set on the previous turn, so a key that's no
@@ -2230,9 +2238,14 @@ async function weyPhoneMainChatInterceptor() {
             positionInPrompt: EXTENSION_PROMPT_POSITION_IN_PROMPT,
             positionInChat: EXTENSION_PROMPT_POSITION_IN_CHAT,
             positionNone: EXTENSION_PROMPT_POSITION_NONE,
+            roleSystem: EXTENSION_PROMPT_ROLE_SYSTEM,
+            roleUser: EXTENSION_PROMPT_ROLE_USER,
         });
         for (const op of ops) {
-            context.setExtensionPrompt(op.key, op.content, op.position, op.depth);
+            // scan (5th positional arg) explicitly false; role is the 6th positional arg in
+            // SillyTavern's real setExtensionPrompt signature (key, value, position, depth, scan,
+            // role, filter).
+            context.setExtensionPrompt(op.key, op.content, op.position, op.depth, false, op.role);
         }
         weyPhoneTetherExtensionPromptKeys = nextKeys;
     } catch (error) {

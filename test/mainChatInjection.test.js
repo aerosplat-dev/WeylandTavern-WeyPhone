@@ -9,7 +9,7 @@ import {
     TETHER_CAUTION_BLOCK,
 } from '../lib/mainChatInjection.js';
 
-const POS = { cautionKey: 'weyphone_tether_caution', positionInPrompt: 0, positionInChat: 1, positionNone: -1 };
+const POS = { cautionKey: 'weyphone_tether_caution', positionInPrompt: 0, positionInChat: 1, positionNone: -1, roleSystem: 0, roleUser: 1 };
 
 function formatClockTime(epochMs) {
     return `T${epochMs}`;
@@ -131,9 +131,23 @@ test('buildMainChatInjectionPlan builds one keyed, depth-positioned block per gr
     const group = plan.groups[0];
     assert.equal(group.depth, 4);
     assert.equal(group.key, 'weyphone_tether_conv1_8');
-    assert.match(group.content, /\[TEXT MESSAGES — Blake\]/);
+    assert.match(group.content, /\*I take a moment to exchange some text messages with Blake\.\*/);
     assert.match(group.content, /Black Barrel/);
-    assert.match(group.content, /\[END TEXT MESSAGES\]/);
+    assert.doesNotMatch(group.content, /\[TEXT MESSAGES/);
+});
+
+test('buildMainChatInjectionPlan composes the asterisk-narration lead-in via formatParticipantNames for multi-participant groups', () => {
+    const conversation = {
+        id: 'conv1', participants: ['Blake', 'Rosa'], lastMemoryMessageIndex: 0, memories: [],
+        messages: [{ role: 'user', content: 'hi both', mainChatAnchor: 3, timestamp: 1000 }],
+    };
+    const plan = buildMainChatInjectionPlan({
+        tetheredConversations: [conversation],
+        currentMainChatLength: 5,
+        userName: 'Alex',
+        formatClockTime,
+    });
+    assert.match(plan.groups[0].content, /\*I take a moment to exchange some text messages with Blake & Rosa\.\*/);
 });
 
 test('buildMainChatInjectionPlan uses "unanchored" in the key for a null-anchor group', () => {
@@ -151,7 +165,7 @@ test('buildMainChatInjectionPlan uses "unanchored" in the key for a null-anchor 
     assert.equal(plan.groups[0].depth, 0);
 });
 
-test('buildMainChatInjectionPlan tags a memory-derived line distinctly from raw messages', () => {
+test('buildMainChatInjectionPlan tags a memory-derived line using the real, current Weyland-LTM [MEMORY ENTRY] bracket convention', () => {
     const conversation = {
         id: 'conv1', participants: ['Blake'], lastMemoryMessageIndex: 5,
         memories: [{ id: 'm1', content: 'They agreed to meet up later.', pinned: true, mainChatAnchor: 3 }],
@@ -163,7 +177,7 @@ test('buildMainChatInjectionPlan tags a memory-derived line distinctly from raw 
         userName: 'Alex',
         formatClockTime,
     });
-    assert.match(plan.groups[0].content, /a memory of an earlier exchange.*They agreed to meet up later\./);
+    assert.match(plan.groups[0].content, /\[MEMORY ENTRY\]\nThey agreed to meet up later\.\n\[END MEMORY ENTRY\]/);
 });
 
 test('buildMainChatInjectionPlan interleaves two threads with different anchors into separate, correctly-depth-ordered groups', () => {
@@ -197,9 +211,9 @@ test('planTetherExtensionPromptOps emits set ops for the caution block and each 
     };
     const { ops, nextKeys } = planTetherExtensionPromptOps(plan, new Set(), POS);
     assert.deepEqual(ops, [
-        { key: 'weyphone_tether_caution', content: 'CAUTION', position: 0, depth: 0 },
-        { key: 'weyphone_tether_convA_0', content: 'A', position: 1, depth: 0 },
-        { key: 'weyphone_tether_convB_3', content: 'B', position: 1, depth: 3 },
+        { key: 'weyphone_tether_caution', content: 'CAUTION', position: 0, depth: 0, role: 0 },
+        { key: 'weyphone_tether_convA_0', content: 'A', position: 1, depth: 0, role: 1 },
+        { key: 'weyphone_tether_convB_3', content: 'B', position: 1, depth: 3, role: 1 },
     ]);
     assert.deepEqual([...nextKeys].sort(), ['weyphone_tether_caution', 'weyphone_tether_convA_0', 'weyphone_tether_convB_3']);
 });
@@ -212,8 +226,8 @@ test('planTetherExtensionPromptOps clears every previously-set key when the new 
     const previousKeys = new Set(['weyphone_tether_caution', 'weyphone_tether_convA_0']);
     const { ops, nextKeys } = planTetherExtensionPromptOps(emptyPlan, previousKeys, POS);
     assert.deepEqual(ops, [
-        { key: 'weyphone_tether_caution', content: '', position: -1, depth: 0 },
-        { key: 'weyphone_tether_convA_0', content: '', position: -1, depth: 0 },
+        { key: 'weyphone_tether_caution', content: '', position: -1, depth: 0, role: 0 },
+        { key: 'weyphone_tether_convA_0', content: '', position: -1, depth: 0, role: 0 },
     ]);
     assert.equal(nextKeys.size, 0);
 });
@@ -226,9 +240,9 @@ test('planTetherExtensionPromptOps clears only the keys that dropped out of the 
     const previousKeys = new Set(['weyphone_tether_caution', 'weyphone_tether_convA_0', 'weyphone_tether_convB_3']);
     const { ops, nextKeys } = planTetherExtensionPromptOps(plan, previousKeys, POS);
     assert.deepEqual(ops, [
-        { key: 'weyphone_tether_caution', content: 'CAUTION', position: 0, depth: 0 },
-        { key: 'weyphone_tether_convA_0', content: 'A', position: 1, depth: 0 },
-        { key: 'weyphone_tether_convB_3', content: '', position: -1, depth: 0 },
+        { key: 'weyphone_tether_caution', content: 'CAUTION', position: 0, depth: 0, role: 0 },
+        { key: 'weyphone_tether_convA_0', content: 'A', position: 1, depth: 0, role: 1 },
+        { key: 'weyphone_tether_convB_3', content: '', position: -1, depth: 0, role: 0 },
     ]);
     assert.deepEqual([...nextKeys].sort(), ['weyphone_tether_caution', 'weyphone_tether_convA_0']);
 });
