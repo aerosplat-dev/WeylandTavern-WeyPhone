@@ -22,6 +22,14 @@ test('getSettings backfills newly-added default keys without clobbering existing
     assert.equal(settings.connectionProfileId, '');
 });
 
+test('getSettings backfills bidirectionalTetheringEnabled as false by default', () => {
+    const extensionSettings = {
+        [MODULE_NAME]: { debug: true, conversations: {} },
+    };
+    const settings = getSettings(extensionSettings);
+    assert.equal(settings.bidirectionalTetheringEnabled, false);
+});
+
 test('getSettings migrates milestone-1-era conversations (keyed by charName, no id) into the current shape', () => {
     const extensionSettings = {
         [MODULE_NAME]: { debug: true, conversations: { Rosa: { messages: ['x'], lastActive: 123 } } },

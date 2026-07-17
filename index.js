@@ -2119,6 +2119,13 @@ async function initExtensionSettingsPanel() {
         context.saveSettingsDebounced();
     });
 
+    const bidirectionalTetheringCheckbox = document.getElementById('wp-settings-bidirectional-tethering-checkbox');
+    bidirectionalTetheringCheckbox.checked = settings.bidirectionalTetheringEnabled;
+    bidirectionalTetheringCheckbox.addEventListener('input', () => {
+        settings.bidirectionalTetheringEnabled = bidirectionalTetheringCheckbox.checked;
+        context.saveSettingsDebounced();
+    });
+
     const modelInput = document.getElementById('wp-settings-model-input');
     modelInput.value = settings.modelId;
     modelInput.addEventListener('input', () => {
