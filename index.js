@@ -2,7 +2,7 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, sameParticipants, findTetheredThreadForRoleplay, isConversationVisible, getVisibleConversationSummaries, getVisibleThreadsFor } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, sameParticipants, findTetheredThreadForRoleplay, isConversationVisible, getVisibleConversationSummaries, getVisibleThreadsFor, setConversationNames, deriveAutoDisplayName } from './lib/storage.js';
 import { buildSystemPrompt, buildGroupSystemPrompt, buildMessages, resolveProfileId, resolveModelOverride, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
 import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen, setRegistrarToggleState } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
@@ -2987,6 +2987,13 @@ function runHijackCaptureForMessage(context, settings, messageId) {
             // bleed into a different roleplay with the same character.
             setTetheredSettings(settings, conversation.id, { tethered: true, roleplayChatId: context.chatId ?? null });
         }
+
+        // Auto-name from the triggering scope's title: stamp on creation (displayName starts null),
+        // fill in later if still empty, sticky once set. deriveAutoDisplayName encapsulates all three
+        // rules; a manual "Rename Thread" (setConversationNames) bypasses it entirely.
+        const autoName = deriveAutoDisplayName(conversation, scope.title);
+        if (autoName !== null) setConversationNames(settings, conversation.id, { displayName: autoName });
+
         const appendedMessages = [];
         for (const msg of plan.messages) {
             const stored = {
