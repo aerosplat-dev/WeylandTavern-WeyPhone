@@ -12,7 +12,7 @@ import { formatParticipantNames } from './lib/participants.js';
 import { parseReply, parseGroupReply } from './lib/messageParsing.js';
 import { locatePhoneScopes, stripPhoneScopes } from './lib/hijackParsing.js';
 import { shouldProcessHijackMessage, evaluateScope, planScopeCapture, dedupeRecap } from './lib/hijackRouting.js';
-import { findMostRecentAssistantMessage, undoCapture, scopeMatchesThreadParticipants } from './lib/hijackManual.js';
+import { findMostRecentAssistantMessage, undoCapture, scopeMatchesThreadParticipants, applyImportWipeRestore } from './lib/hijackManual.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
@@ -2620,18 +2620,14 @@ function handleImportFromScenario({ wipeFirst, parseUnscoped }) {
                 for (const msg of importedMessages) appendMessage(settings, conversation.id, msg);
                 // Restore every OTHER same-participant thread -- only `conversation` should end up
                 // rebuilt; siblings were wiped solely so the dedup lookup above saw them empty too.
-                for (const snap of snapshots) {
-                    if (snap.conv === conversation) continue;
-                    snap.conv.messages = snap.messages;
-                    snap.conv.lastActive = snap.lastActive;
-                    snap.conv.lastMemoryMessageIndex = snap.lastMemoryMessageIndex;
-                }
+                // Also resets `conversation`'s own lastMemoryMessageIndex to 0 (see
+                // applyImportWipeRestore's doc comment): the rebuilt messages array is entirely new,
+                // so the pre-rebuild memory-tracking index no longer refers to anything meaningful.
+                applyImportWipeRestore(snapshots, conversation, true);
             } catch (innerError) {
-                for (const snap of snapshots) {
-                    snap.conv.messages = snap.messages;
-                    snap.conv.lastActive = snap.lastActive;
-                    snap.conv.lastMemoryMessageIndex = snap.lastMemoryMessageIndex;
-                }
+                // Full rollback on any error mid-scan/append: EVERY snapshotted thread, including
+                // `conversation` itself, is restored to its exact pre-wipe state.
+                applyImportWipeRestore(snapshots, conversation, false);
                 throw innerError;
             }
         } else {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { findMostRecentAssistantMessage } from '../lib/hijackManual.js';
 import { undoCapture } from '../lib/hijackManual.js';
 import { scopeMatchesThreadParticipants } from '../lib/hijackManual.js';
+import { applyImportWipeRestore } from '../lib/hijackManual.js';
 
 test('findMostRecentAssistantMessage returns null for an empty chat', () => {
     assert.equal(findMostRecentAssistantMessage([]), null);
@@ -168,4 +169,48 @@ test('scopeMatchesThreadParticipants: a USER-perspective scope (no CHAR owner) n
     const scope = { owner: null, title: null, lines: [], lineIndices: [] };
     const decision = { captured: true, perspective: 'USER', ownerEntryName: null };
     assert.equal(scopeMatchesThreadParticipants(scope, decision, ['Rosa'], ['Rosa'], true), false);
+});
+
+test('applyImportWipeRestore: on success, the target keeps its rebuilt messages and has lastMemoryMessageIndex reset to 0, while every sibling is restored to its exact snapshot', () => {
+    const target = { id: 'target', messages: ['REBUILT'], lastActive: 999, lastMemoryMessageIndex: 42 };
+    const sibling = { id: 'sibling', messages: [], lastActive: 0, lastMemoryMessageIndex: 0 };
+    const snapshots = [
+        { conv: target, messages: ['old target msg 1', 'old target msg 2'], lastActive: 100, lastMemoryMessageIndex: 5 },
+        { conv: sibling, messages: ['sibling msg'], lastActive: 200, lastMemoryMessageIndex: 3 },
+    ];
+    applyImportWipeRestore(snapshots, target, true);
+    // Target keeps its rebuilt content, but its memory-tracking index is reset to 0.
+    assert.deepEqual(target.messages, ['REBUILT']);
+    assert.equal(target.lastActive, 999);
+    assert.equal(target.lastMemoryMessageIndex, 0);
+    // Sibling is restored to its exact pre-wipe snapshot.
+    assert.deepEqual(sibling.messages, ['sibling msg']);
+    assert.equal(sibling.lastActive, 200);
+    assert.equal(sibling.lastMemoryMessageIndex, 3);
+});
+
+test('applyImportWipeRestore: on failure, the target AND every sibling are restored to their exact snapshots (full rollback)', () => {
+    const target = { id: 'target', messages: [], lastActive: 999, lastMemoryMessageIndex: 42 };
+    const sibling = { id: 'sibling', messages: [], lastActive: 0, lastMemoryMessageIndex: 0 };
+    const snapshots = [
+        { conv: target, messages: ['old target msg 1', 'old target msg 2'], lastActive: 100, lastMemoryMessageIndex: 5 },
+        { conv: sibling, messages: ['sibling msg'], lastActive: 200, lastMemoryMessageIndex: 3 },
+    ];
+    applyImportWipeRestore(snapshots, target, false);
+    assert.deepEqual(target.messages, ['old target msg 1', 'old target msg 2']);
+    assert.equal(target.lastActive, 100);
+    assert.equal(target.lastMemoryMessageIndex, 5);
+    assert.deepEqual(sibling.messages, ['sibling msg']);
+    assert.equal(sibling.lastActive, 200);
+    assert.equal(sibling.lastMemoryMessageIndex, 3);
+});
+
+test('applyImportWipeRestore: with no siblings (the common single-thread case), success only resets the target\'s lastMemoryMessageIndex', () => {
+    const target = { id: 'target', messages: ['REBUILT'], lastActive: 999, lastMemoryMessageIndex: 42 };
+    const snapshots = [
+        { conv: target, messages: ['old msg'], lastActive: 100, lastMemoryMessageIndex: 5 },
+    ];
+    applyImportWipeRestore(snapshots, target, true);
+    assert.deepEqual(target.messages, ['REBUILT']);
+    assert.equal(target.lastMemoryMessageIndex, 0);
 });
