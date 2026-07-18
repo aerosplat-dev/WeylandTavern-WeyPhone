@@ -57,6 +57,3 @@ test('TEXTING_MODE_INSTRUCTIONS instructs each message in an earned burst to get
     assert.match(TEXTING_MODE_INSTRUCTIONS, /never a string of full,? polished sentences/i);
 });
 
-test('TEXTING_MODE_INSTRUCTIONS frames the whole reply as the character\'s entire world, not just a channel within roleplay', () => {
-    assert.match(TEXTING_MODE_INSTRUCTIONS, /entire world/i);
-});

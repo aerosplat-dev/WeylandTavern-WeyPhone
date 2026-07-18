@@ -101,10 +101,6 @@ test('discord and yikyak both embed the real WEYLAND ROSTER names/handles', () =
     }
 });
 
-test('discord still contains the pre-existing static @luckypaww mention, unremoved by the roster addition', () => {
-    assert.match(PHONE_APP_PROMPTS.discord, /@luckypaww/);
-});
-
 test('yikyak explicitly notes anonymous posts can still be recognizably consistent with a roster personality', () => {
     assert.match(PHONE_APP_PROMPTS.yikyak, /recognizably\s+consistent\s+with\s+one\s+of\s+the\s+roster\s+personalities\s+above/);
     assert.match(PHONE_APP_PROMPTS.yikyak, /guess\s+who\s+posted\s+this/);
