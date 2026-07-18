@@ -2323,40 +2323,22 @@ function initPanel() {
 
 // SillyTavern derives an extension's renderExtensionTemplateAsync id from where its folder
 // physically lives, not from manifest.json: 'third-party/<Name>' under a user's own
-// data/<user>/extensions/ (the documented house convention this extension follows), but just
-// '<Name>' if it's ever deployed directly under the bundled public/scripts/extensions/ tree
-// instead. A hardcoded assumption of one or the other 404s consistently — immune to restarts or
-// cache-clearing — whenever the actual deployment doesn't match the guess, while the rest of the
-// extension (manifest.json/index.js/style.css, all served through generic static serving) keeps
-// working fine. This already happened once before to Weyland-Proofreader (see its own index.js
-// TEMPLATE_NAME comment). Tried in this order — third-party first, since that's the documented
-// convention — and cached once resolved, since an extension's install location can't change
-// mid-session.
-const WEYPHONE_EXTENSION_NAME_CANDIDATES = ['third-party/Weyland-WeyPhone', 'Weyland-WeyPhone'];
-let cachedExtensionTemplateName = null;
-
-/**
- * Determines which of WEYPHONE_EXTENSION_NAME_CANDIDATES actually resolves on this server, via a
- * silent HEAD request against each candidate's settings.html URL — the same static route
- * renderExtensionTemplateAsync's own fetch hits, but without invoking ST's render/toast pipeline,
- * so a wrong guess never surfaces its own "Error rendering template" toast.
- * @returns {Promise<string>} the extension name to pass to renderExtensionTemplateAsync
- */
-async function resolveExtensionTemplateName() {
-    if (cachedExtensionTemplateName) return cachedExtensionTemplateName;
-    for (const name of WEYPHONE_EXTENSION_NAME_CANDIDATES) {
-        try {
-            const response = await fetch(`/scripts/extensions/${name}/settings.html`, { method: 'HEAD' });
-            if (response.ok) {
-                cachedExtensionTemplateName = name;
-                return name;
-            }
-        } catch {
-            // Network error probing this candidate — fall through and try the next one.
-        }
-    }
-    return WEYPHONE_EXTENSION_NAME_CANDIDATES[0];
-}
+// data/<user>/extensions/, but just '<Name>' if it's deployed directly under the bundled
+// public/scripts/extensions/ tree instead — and <Name> itself isn't fixed either (this repo's own
+// git remote, WeylandTavern-WeyPhone, is already named differently from this local folder,
+// Weyland-WeyPhone, so a plain `git clone`/`git pull` elsewhere can land under either name). Any
+// hardcoded guess at either the location or the folder name 404s consistently for every install
+// that doesn't match it — immune to restarts or cache-clearing — while the rest of the extension
+// (manifest.json/index.js/style.css, served through generic static routing) keeps working fine.
+// This already happened once before to Weyland-Proofreader (see its own index.js TEMPLATE_NAME
+// comment) and repeated for WeyPhone, so it isn't safe to special-case again with another guess —
+// derive it, don't hardcode it. Since this module is loaded by SillyTavern as a real
+// `<script type="module">` (addExtensionScript, public/scripts/extensions.js) from
+// `/scripts/extensions/<id>/index.js`, import.meta.url IS that real, current id, regardless of
+// install location or folder name.
+const EXTENSION_TEMPLATE_NAME = new URL('.', import.meta.url).pathname
+    .replace(/^\/scripts\/extensions\//, '')
+    .replace(/\/$/, '');
 
 /**
  * Fetches WeyPhone's settings.html via SillyTavern's renderExtensionTemplateAsync, retrying a
@@ -2372,9 +2354,8 @@ async function resolveExtensionTemplateName() {
  * @returns {Promise<string | undefined>}
  */
 async function fetchSettingsTemplateWithRetry(context, attempts = 3, delayMs = 500) {
-    const templateName = await resolveExtensionTemplateName();
     for (let attempt = 1; attempt <= attempts; attempt++) {
-        const template = await context.renderExtensionTemplateAsync(templateName, 'settings');
+        const template = await context.renderExtensionTemplateAsync(EXTENSION_TEMPLATE_NAME, 'settings');
         if (template) return template;
         if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
