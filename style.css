@@ -1500,3 +1500,40 @@
     gap: 8px;
     margin-top: 16px;
 }
+
+/* WeyPhone confirm dialog — the shared Yes/No overlay used by the tether/untether flows.
+   Same floating-frame convention as Configure-Nicknames/Import-from-Scenario above, but with its
+   own class names (.wp-confirm-frame/.wp-confirm-message/.wp-confirm-actions) since callers pass
+   an arbitrary list of message strings rather than fixed markup. */
+#wp-weyphone-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+}
+#wp-weyphone-confirm-overlay .wp-confirm-frame {
+    width: min(440px, 92vw);
+    max-height: 88vh;
+    overflow-y: auto;
+    background: var(--SmartThemeBlurTintColor, #1b1b1f);
+    color: var(--SmartThemeBodyColor, #e6e6e6);
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+#wp-weyphone-confirm-overlay h3 { margin: 0 0 12px; }
+#wp-weyphone-confirm-overlay .wp-confirm-message {
+    margin: 0 0 10px;
+    line-height: 1.4;
+    font-size: 0.92em;
+}
+#wp-weyphone-confirm-overlay .wp-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}

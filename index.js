@@ -2,7 +2,7 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor, sameParticipants } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor, sameParticipants, findTetheredThreadForRoleplay } from './lib/storage.js';
 import { buildSystemPrompt, buildGroupSystemPrompt, buildMessages, resolveProfileId, resolveModelOverride, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
 import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen, setRegistrarToggleState } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
@@ -2226,11 +2226,17 @@ function initPanel() {
     }, true);
 
     document.getElementById('wp-tethered-checkbox').addEventListener('change', (event) => {
-        if (!currentConversationId) return;
-        const context = SillyTavern.getContext();
-        const settings = getSettings(context.extensionSettings);
-        setTetheredSettings(settings, currentConversationId, { tethered: event.target.checked });
-        context.saveSettingsDebounced();
+        const checkbox = event.target;
+        if (!currentConversationId) { checkbox.checked = false; return; }
+        // The box has already visually flipped by the time this fires. Route to the confirm-gated
+        // flow, which either commits the new state or reverts checkbox.checked on cancel. Setting
+        // .checked programmatically (in the revert/commit paths) does NOT re-fire 'change', so there
+        // is no re-entrancy to guard against.
+        if (checkbox.checked) {
+            runTetherFlow(checkbox, currentConversationId);
+        } else {
+            runUntetherFlow(checkbox, currentConversationId);
+        }
     });
 
     // Rebuilds the Housing iframe's own src with/without ?registrar=true — the map page gates its
@@ -2360,6 +2366,118 @@ async function initExtensionSettingsPanel() {
     if (undoCaptureButton) undoCaptureButton.addEventListener('click', handleUndoLastCapture);
     refreshCaptureToolsAvailability();
     context.eventSource.on(context.eventTypes.CHAT_CHANGED, refreshCaptureToolsAvailability);
+}
+
+/**
+ * Hand-rolled Yes/No confirmation overlay — same convention as renderNicknameConfigFrame (no
+ * Popup/callGenericPopup dependency exists in this extension). `messages` is rendered as one <p> per
+ * entry (callers pass a conditional array). onConfirm fires on the confirm button; onCancel fires on
+ * the cancel button, the backdrop click, AND the ×, exactly once each, since the overlay is removed
+ * immediately on any dismissal. Both callbacks are optional.
+ * @param {{title: string, messages: string[], confirmLabel: string, cancelLabel: string,
+ *          onConfirm?: () => void, onCancel?: () => void}} options
+ */
+function showWeyPhoneConfirmDialog({ title, messages, confirmLabel, cancelLabel, onConfirm, onCancel }) {
+    document.getElementById('wp-weyphone-confirm-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'wp-weyphone-confirm-overlay';
+    const frame = document.createElement('div');
+    frame.className = 'wp-confirm-frame';
+    overlay.appendChild(frame);
+
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    frame.appendChild(heading);
+
+    for (const text of messages) {
+        const p = document.createElement('p');
+        p.className = 'wp-confirm-message';
+        p.textContent = text;
+        frame.appendChild(p);
+    }
+
+    let settled = false;
+    const dismiss = (which) => {
+        if (settled) return;
+        settled = true;
+        overlay.remove();
+        if (which === 'confirm') onConfirm?.();
+        else onCancel?.();
+    };
+
+    const actions = document.createElement('div');
+    actions.className = 'wp-confirm-actions';
+    const cancelBtn = document.createElement('input');
+    cancelBtn.className = 'menu_button';
+    cancelBtn.type = 'button';
+    cancelBtn.value = cancelLabel;
+    cancelBtn.addEventListener('click', () => dismiss('cancel'));
+    const confirmBtn = document.createElement('input');
+    confirmBtn.className = 'menu_button';
+    confirmBtn.type = 'button';
+    confirmBtn.value = confirmLabel;
+    confirmBtn.addEventListener('click', () => dismiss('confirm'));
+    actions.append(cancelBtn, confirmBtn);
+    frame.appendChild(actions);
+
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss('cancel'); });
+    document.body.appendChild(overlay);
+    confirmBtn.focus();
+}
+
+/**
+ * Dialog-gated tether flow (untethered -> tethered). Called from the wp-tethered-checkbox change
+ * handler when the user checks the box. Always shows the confirmation; on confirm runs (in order) the
+ * uniqueness check, the memory checkpoint (only if there's backlog), then the stamp. On cancel (button,
+ * backdrop, or ×) reverts the checkbox to unchecked. `checkbox` is the live #wp-tethered-checkbox.
+ * @param {HTMLInputElement} checkbox
+ * @param {string} conversationId
+ */
+function runTetherFlow(checkbox, conversationId) {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, conversationId);
+    if (!conversation) { checkbox.checked = false; return; }
+
+    const messages = [
+        'Tethering will make this thread only accessible while this roleplay is the active chat.',
+    ];
+    if (conversation.messages.length > 0) {
+        messages.push('Since this thread has existing messages, tethering will generate a memory summarizing them as a starting point — text messages from before that point will never be injected into the roleplay.');
+    }
+
+    showWeyPhoneConfirmDialog({
+        title: 'Tether this thread?',
+        messages,
+        confirmLabel: 'Tether',
+        cancelLabel: 'Cancel',
+        onCancel: () => { checkbox.checked = false; },
+        onConfirm: async () => {
+            const chatId = context.chatId;
+            // 1. Uniqueness: a DIFFERENT thread already tethered to this same (participants, roleplay).
+            const existing = findTetheredThreadForRoleplay(settings, conversation.participants, chatId);
+            if (existing && existing.id !== conversationId) {
+                checkbox.checked = false;
+                toastr.warning('Another thread with these same participants is already tethered to this roleplay. Untether it first.', 'WeyPhone');
+                return;
+            }
+            // 2. Memory checkpoint — only if there's unsummarized backlog. generateMemory is the
+            // existing pipeline (pinned, mainChatAnchor "now", advances lastMemoryMessageIndex).
+            // Post-Task-0 it generates for ANY thread shape (solo full-bot, solo subbot, or group) —
+            // the only skip is the genuine "no backlog" case guarded by the getMemoryWindow check
+            // above, so this checkpoint is universally honored.
+            if (getMemoryWindow(conversation).messages.length > 0) {
+                await generateMemory(conversationId, conversation, context, settings, { silent: true });
+            }
+            // 3. Stamp.
+            setTetheredSettings(settings, conversationId, { tethered: true, roleplayChatId: chatId });
+            context.saveSettingsDebounced();
+            checkbox.checked = true;
+            updateTetheredToggleAvailability();
+            refreshUnreadBadges();
+        },
+    });
 }
 
 /**
