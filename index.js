@@ -2918,7 +2918,10 @@ function runHijackCaptureForMessage(context, settings, messageId) {
 
     // Each scope is evaluated, routed, and captured/skipped completely independently.
     const capturedScopes = [];
-    const toastParticipantSets = [];
+    // Carries the actual conversation object (not just plan.participants) so the toast can resolve
+    // each thread's real display name (custom rename/auto-name) via resolveThreadDisplayName at
+    // render time below, rather than always falling back to raw participant names.
+    const toastConversations = [];
     for (const scope of scopes) {
         const decision = evaluateScope(scope, ctx, settings);
         if (!decision.captured) continue;
@@ -2956,7 +2959,7 @@ function runHijackCaptureForMessage(context, settings, messageId) {
         }
         accrueUnread(settings, conversation.id, plan.unreadIncrement);
         capturedScopes.push(scope);
-        toastParticipantSets.push(plan.participants);
+        toastConversations.push(conversation);
         affectedConversations.push({ conversationId: conversation.id, appendedMessages, wasNewlyCreated });
     }
 
@@ -2974,8 +2977,8 @@ function runHijackCaptureForMessage(context, settings, messageId) {
     context.saveSettingsDebounced();
     refreshUnreadBadges();
     refreshVisibleScreen();
-    for (const participants of toastParticipantSets) {
-        toastr.info(`New message from ${formatParticipantNames(participants)}`, 'WeyPhone');
+    for (const conversation of toastConversations) {
+        toastr.info(`New message from ${resolveThreadDisplayName(conversation)}`, 'WeyPhone');
     }
     return true;
 }
@@ -3001,7 +3004,7 @@ function weyPhoneHijackHandler(messageId) {
  * "Capture Last Message" button handler (extension-settings panel). Manually re-runs capture
  * against the most recent assistant-authored message in the active roleplay chat, without needing
  * a fresh generation — recovers from cases where the live MESSAGE_RECEIVED handler didn't fire
- * (e.g. a swipe anomaly) and lets a user re-run capture after adjusting nickname configuration.
+ * (e.g. a swipe anomaly).
  * Per spec, enablement is ONLY "no active roleplay" / "no assistant message found" (see
  * refreshCaptureToolsAvailability) — deliberately NOT gated on hijackEnabled or
  * bidirectionalTetheringEnabled the way the live automatic handler is, since this manual tool
