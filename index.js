@@ -2470,7 +2470,20 @@ function runTetherFlow(checkbox, conversationId) {
             if (getMemoryWindow(conversation).messages.length > 0) {
                 await generateMemory(conversationId, conversation, context, settings, { silent: true });
             }
-            // 3. Stamp.
+            // 3. Re-check uniqueness immediately before stamping. The await above (generateMemory,
+            // a real LLM call) can take several seconds — long enough for a concurrent tether flow
+            // (e.g. a different thread with the same participants, switched to mid-flight) to have
+            // passed its own check-1 and completed its own stamp while this flow was awaiting. This
+            // re-check reuses the exact same predicate as check 1 (same function, same args) so any
+            // stamp that landed in the meantime is now visible here and this flow backs out instead
+            // of violating the at-most-one-tethered-thread invariant.
+            const stillClear = findTetheredThreadForRoleplay(settings, conversation.participants, chatId);
+            if (stillClear && stillClear.id !== conversationId) {
+                checkbox.checked = false;
+                toastr.warning('Another thread with these same participants is already tethered to this roleplay. Untether it first.', 'WeyPhone');
+                return;
+            }
+            // 4. Stamp.
             setTetheredSettings(settings, conversationId, { tethered: true, roleplayChatId: chatId });
             context.saveSettingsDebounced();
             checkbox.checked = true;
