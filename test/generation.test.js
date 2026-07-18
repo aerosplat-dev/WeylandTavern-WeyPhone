@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSystemPrompt, buildMessages, resolveProfileId, resolveModelOverride, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, buildGroupSystemPrompt } from '../lib/generation.js';
+import { fakeFormatClockTime } from './helpers.js';
 
 test('buildSystemPrompt joins non-empty sections in main->WIbefore->description->personality->scenario->WIafter order', () => {
     const result = buildSystemPrompt({
@@ -198,7 +199,6 @@ test('reconstructHistoryAsPhoneFormat wraps user turns as Outgoing lines and ass
         { role: 'user', content: 'hey', timestamp: 1000 },
         { role: 'assistant', content: 'hi there', timestamp: 2000 },
     ];
-    const fakeFormatClockTime = (ms) => `T${ms}`;
     const result = reconstructHistoryAsPhoneFormat(history, { charName: 'Rosa', userName: 'Ava' }, fakeFormatClockTime);
     assert.deepEqual(result, [
         { role: 'user', content: 'Outgoing¦T1000¦Ava¦hey' },

@@ -2,24 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPortraitMap, buildPsaPortraitMap } from '../lib/portraits.js';
 import { ASSET_BASE_URL } from '../lib/assetPaths.js';
-
-function fakeGetThumbnailUrl(type, file) {
-    return `/thumbnail?type=${type}&file=${file}`;
-}
+import { fakeGetThumbnailUrl } from './helpers.js';
 
 test('buildPortraitMap resolves both a weybooru primary URL and a local fallback for a known character', () => {
     const characters = [{ name: 'Blake', avatar: 'blake.png' }];
-    const getThumbnailUrl = (type, file) => `/thumbnail/${type}/${file}`;
-    const map = buildPortraitMap(characters, ['Blake'], getThumbnailUrl);
+    const map = buildPortraitMap(characters, ['Blake'], fakeGetThumbnailUrl);
     assert.equal(map.Blake.primaryUrl, 'https://cast.weybooru.com/images/portraits/blake.jpg');
-    assert.equal(map.Blake.fallbackUrl, '/thumbnail/avatar/blake.png');
+    assert.equal(map.Blake.fallbackUrl, '/thumbnail?type=avatar&file=blake.png');
     assert.equal(map.Blake.initial, null);
 });
 
 test('buildPortraitMap lowercases a single-word name correctly for the weybooru URL', () => {
     const characters = [{ name: 'Kris', avatar: 'kris.png' }];
-    const getThumbnailUrl = (type, file) => `/thumbnail/${type}/${file}`;
-    const map = buildPortraitMap(characters, ['Kris'], getThumbnailUrl);
+    const map = buildPortraitMap(characters, ['Kris'], fakeGetThumbnailUrl);
     assert.equal(map.Kris.primaryUrl, 'https://cast.weybooru.com/images/portraits/kris.jpg');
 });
 

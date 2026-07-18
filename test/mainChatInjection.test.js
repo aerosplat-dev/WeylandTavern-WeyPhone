@@ -8,12 +8,9 @@ import {
     planTetherExtensionPromptOps,
     TETHER_CAUTION_BLOCK,
 } from '../lib/mainChatInjection.js';
+import { fakeFormatClockTime as formatClockTime } from './helpers.js';
 
 const POS = { cautionKey: 'weyphone_tether_caution', positionInPrompt: 0, positionInChat: 1, positionNone: -1, roleSystem: 0, roleUser: 1 };
-
-function formatClockTime(epochMs) {
-    return `T${epochMs}`;
-}
 
 test('selectInjectableContent returns pinned memories and messages since lastMemoryMessageIndex', () => {
     const conversation = {

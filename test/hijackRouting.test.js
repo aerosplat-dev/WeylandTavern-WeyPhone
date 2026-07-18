@@ -1,12 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveHijackSpeaker, resolveUserReference, evaluateScope, dedupeRecap, planScopeCapture, shouldProcessHijackMessage } from '../lib/hijackRouting.js';
-
-const ROSTER = [
-    { entryName: 'Rosa', fullName: 'Rosa Vermillion', hasFullBot: true, hasSubbot: true },
-    { entryName: 'Belle', fullName: 'Belle Cadence', hasFullBot: true, hasSubbot: true },
-    { entryName: 'Blake', fullName: 'Blake Wolfe', hasFullBot: true, hasSubbot: true },
-];
+import { ROSTER } from './helpers.js';
 
 test('resolveHijackSpeaker matches a bare entryName case-insensitively (canonical casing returned)', () => {
     assert.equal(resolveHijackSpeaker('rosa', ROSTER), 'Rosa');

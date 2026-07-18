@@ -2,13 +2,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest, resolveMemoryPersona } from '../lib/memoryGeneration.js';
+import { fakeFormatClockTime } from './helpers.js';
 
 test('buildMemoryGenerationMessages returns a system+user message pair', () => {
     const windowMessages = [
         { role: 'user', content: 'hey', timestamp: 1000 },
         { role: 'assistant', content: 'hi there', timestamp: 2000 },
     ];
-    const fakeFormatClockTime = (ms) => `T${ms}`;
     const messages = buildMemoryGenerationMessages({
         charName: 'Rosa',
         personalityText: 'Rosa is blunt and sarcastic.',
@@ -72,7 +72,6 @@ test('buildMemoryGenerationMessages user message contains the phone-format trans
         { role: 'user', content: 'hey', timestamp: 1000 },
         { role: 'assistant', content: 'hi there', timestamp: 2000 },
     ];
-    const fakeFormatClockTime = (ms) => `T${ms}`;
     const messages = buildMemoryGenerationMessages({
         charName: 'Rosa',
         personalityText: '',
