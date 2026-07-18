@@ -1386,15 +1386,21 @@
     border-bottom-left-radius: 6px;
 }
 
-/* Configure-Nicknames floating frame — lives OUTSIDE #wp-portal (its own stacking context). */
+/* Configure-Nicknames floating frame — lives INSIDE #wp-portal. Must be position:absolute, not
+   fixed: a bare position:fixed child of <body> breaks on mobile because SillyTavern sets a
+   non-`none` transform on <html>, which becomes the containing block for such an element and
+   resolves to a 0-height box (same class of bug already fixed for #wp-toggle-button/#wp-panel —
+   see the comment at the top of this file). #wp-portal disables pointer-events on itself, so this
+   re-enables them. */
 #wp-nickname-config-overlay {
-    position: fixed;
+    position: absolute;
     inset: 0;
     z-index: 1000000;
     display: flex;
     align-items: center;
     justify-content: center;
     background: rgba(0, 0, 0, 0.55);
+    pointer-events: auto;
 }
 #wp-nickname-config-overlay .wp-nick-frame {
     width: min(520px, 92vw);
@@ -1464,16 +1470,18 @@
 }
 
 /* Import-from-Scenario confirm overlay — same floating-frame pattern as Configure-Nicknames
-   above (lives OUTSIDE #wp-portal, its own stacking context); reuses the .wp-nick-frame/
-   .wp-nick-actions classes verbatim, so it only needs its own id-scoped copy of the base rules —
-   a new overlay id does not inherit another overlay's id-scoped CSS. */
+   above (lives INSIDE #wp-portal — position:absolute, not fixed, for the same mobile
+   containing-block reason documented there); reuses the .wp-nick-frame/.wp-nick-actions classes
+   verbatim, so it only needs its own id-scoped copy of the base rules — a new overlay id does not
+   inherit another overlay's id-scoped CSS. */
 #wp-import-scenario-overlay {
-    position: fixed;
+    position: absolute;
     inset: 0;
     z-index: 1000000;
     display: flex;
     align-items: center;
     justify-content: center;
+    pointer-events: auto;
     background: rgba(0, 0, 0, 0.55);
 }
 #wp-import-scenario-overlay .wp-nick-frame {
@@ -1502,16 +1510,19 @@
 }
 
 /* WeyPhone confirm dialog — the shared Yes/No overlay used by the tether/untether flows.
-   Same floating-frame convention as Configure-Nicknames/Import-from-Scenario above, but with its
-   own class names (.wp-confirm-frame/.wp-confirm-message/.wp-confirm-actions) since callers pass
-   an arbitrary list of message strings rather than fixed markup. */
+   Same floating-frame convention as Configure-Nicknames/Import-from-Scenario above (lives INSIDE
+   #wp-portal — position:absolute, not fixed, for the same mobile containing-block reason
+   documented there), but with its own class names (.wp-confirm-frame/.wp-confirm-message/
+   .wp-confirm-actions) since callers pass an arbitrary list of message strings rather than fixed
+   markup. */
 #wp-weyphone-confirm-overlay {
-    position: fixed;
+    position: absolute;
     inset: 0;
     z-index: 1000000;
     display: flex;
     align-items: center;
     justify-content: center;
+    pointer-events: auto;
     background: rgba(0, 0, 0, 0.55);
 }
 #wp-weyphone-confirm-overlay .wp-confirm-frame {

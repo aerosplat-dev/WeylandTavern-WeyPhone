@@ -2435,7 +2435,7 @@ function showWeyPhoneConfirmDialog({ title, messages, confirmLabel, cancelLabel,
     frame.appendChild(actions);
 
     overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss('cancel'); });
-    document.body.appendChild(overlay);
+    ensurePortal().appendChild(overlay);
     confirmBtn.focus();
 }
 
@@ -2667,17 +2667,20 @@ function renderNicknameConfigFrame() {
     frame.appendChild(actions);
 
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-    document.body.appendChild(overlay);
+    ensurePortal().appendChild(overlay);
     chipInput.focus();
 }
 
 /**
- * Builds and shows the Import-from-Scenario confirm overlay OUTSIDE #wp-portal, modeled on
- * renderNicknameConfigFrame's own hand-rolled overlay pattern above (no ST Popup/callGenericPopup
- * exists anywhere in this extension, so this follows the same house convention rather than
- * introducing a new dependency). "Delete the current thread?" with Yes/No, plus an
- * unchecked-by-default "Parse unscoped messages" checkbox. Read-only against the roleplay: the
- * scan below never mutates context.chat or any message's .mes.
+ * Builds and shows the Import-from-Scenario confirm overlay inside #wp-portal (see ensurePortal's
+ * own doc comment for why: a bare position:fixed element parented directly under <body> breaks on
+ * mobile, since SillyTavern sets a non-`none` transform on <html> which becomes the containing
+ * block for such an element — resolving to a 0-height box since <html> has no explicit height).
+ * Modeled on renderNicknameConfigFrame's own hand-rolled overlay pattern above (no ST
+ * Popup/callGenericPopup exists anywhere in this extension, so this follows the same house
+ * convention rather than introducing a new dependency). "Delete the current thread?" with Yes/No,
+ * plus an unchecked-by-default "Parse unscoped messages" checkbox. Read-only against the
+ * roleplay: the scan below never mutates context.chat or any message's .mes.
  */
 function renderImportScenarioOverlay() {
     const context = SillyTavern.getContext();
@@ -2730,7 +2733,7 @@ function renderImportScenarioOverlay() {
     frame.appendChild(actions);
 
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-    document.body.appendChild(overlay);
+    ensurePortal().appendChild(overlay);
 }
 
 /**
