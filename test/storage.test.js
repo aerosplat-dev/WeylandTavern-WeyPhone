@@ -22,9 +22,11 @@ import {
     getMemoryWindow,
     getLastGeneratedMemory,
     migrateTetheredFields,
+    migrateRoleplayChatIdField,
     setTetheredSettings,
     getThreadsFor,
     findMostRecentThread,
+    findTetheredThreadForRoleplay,
     migrateParticipantsField,
     migrateUnreadCountField,
     genTimestamp,
@@ -583,6 +585,84 @@ test('migrateTetheredFields does not overwrite existing tethered data', () => {
     const conversation = settings.conversations.conv_1;
     assert.equal(conversation.tethered, true);
     assert.equal(conversation.tetheredHistoryCap, 40);
+});
+
+test('createConversation defaults roleplayChatId to null', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, ['Rosa']);
+    assert.equal(conversation.roleplayChatId, null);
+});
+
+test('setTetheredSettings stamps and clears roleplayChatId (string or explicit null applied; omission unchanged)', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, ['Rosa']);
+    setTetheredSettings(settings, conversation.id, { tethered: true, roleplayChatId: 'chat-abc' });
+    assert.equal(conversation.tethered, true);
+    assert.equal(conversation.roleplayChatId, 'chat-abc');
+    // omitting roleplayChatId leaves it unchanged
+    setTetheredSettings(settings, conversation.id, { tetheredHistoryCap: 5 });
+    assert.equal(conversation.roleplayChatId, 'chat-abc');
+    // explicit null clears it
+    setTetheredSettings(settings, conversation.id, { tethered: false, roleplayChatId: null });
+    assert.equal(conversation.tethered, false);
+    assert.equal(conversation.roleplayChatId, null);
+});
+
+test('migrateRoleplayChatIdField force-untethers legacy threads (no roleplayChatId key) and is idempotent', () => {
+    const settings = { conversations: {
+        legacyTethered: { id: 'legacyTethered', participants: ['Rosa'], messages: [], tethered: true, tetheredHistoryCap: 12 },
+        legacyUntethered: { id: 'legacyUntethered', participants: ['Ava'], messages: [], tethered: false },
+    } };
+    migrateRoleplayChatIdField(settings);
+    // legacy tethered -> force-untethered, roleplayChatId stamped null, tetheredHistoryCap untouched
+    assert.equal(settings.conversations.legacyTethered.tethered, false);
+    assert.equal(settings.conversations.legacyTethered.roleplayChatId, null);
+    assert.equal(settings.conversations.legacyTethered.tetheredHistoryCap, 12);
+    // legacy untethered -> just gains the key
+    assert.equal(settings.conversations.legacyUntethered.tethered, false);
+    assert.equal(settings.conversations.legacyUntethered.roleplayChatId, null);
+    const snapshot = JSON.parse(JSON.stringify(settings));
+    migrateRoleplayChatIdField(settings);
+    assert.deepEqual(settings, snapshot); // second run changes nothing
+});
+
+test('migrateRoleplayChatIdField NEVER touches a post-migration thread (has the key) even if tethered', () => {
+    // This is the critical guard: getSettings re-runs the migration on every operation, so a
+    // legitimately-tethered post-migration thread must survive re-migration untouched.
+    const settings = { conversations: {
+        live: { id: 'live', participants: ['Rosa'], messages: [], tethered: true, roleplayChatId: 'chat-xyz' },
+    } };
+    migrateRoleplayChatIdField(settings);
+    assert.equal(settings.conversations.live.tethered, true);
+    assert.equal(settings.conversations.live.roleplayChatId, 'chat-xyz');
+});
+
+test('findTetheredThreadForRoleplay matches only tethered + same roleplayChatId + same participants', () => {
+    const settings = { conversations: {} };
+    const wrongChat = createConversation(settings, ['Rosa']);
+    setTetheredSettings(settings, wrongChat.id, { tethered: true, roleplayChatId: 'chat-OTHER' });
+    const untethered = createConversation(settings, ['Rosa']);      // same participants, NOT tethered
+    const match = createConversation(settings, ['Rosa']);
+    setTetheredSettings(settings, match.id, { tethered: true, roleplayChatId: 'chat-HERE' });
+    const wrongParticipants = createConversation(settings, ['Ava']);
+    setTetheredSettings(settings, wrongParticipants.id, { tethered: true, roleplayChatId: 'chat-HERE' });
+
+    assert.equal(findTetheredThreadForRoleplay(settings, ['Rosa'], 'chat-HERE')?.id, match.id);
+    assert.equal(findTetheredThreadForRoleplay(settings, ['Rosa'], 'chat-NONE'), undefined);
+    assert.equal(findTetheredThreadForRoleplay(settings, ['Ava'], 'chat-OTHER'), undefined);
+    // an untethered same-participants thread is never returned
+    assert.notEqual(findTetheredThreadForRoleplay(settings, ['Rosa'], 'chat-HERE')?.id, untethered.id);
+});
+
+test('findTetheredThreadForRoleplay returns the most-recently-active among multiple tethered matches', () => {
+    const settings = { conversations: {} };
+    const older = createConversation(settings, ['Rosa']);
+    setTetheredSettings(settings, older.id, { tethered: true, roleplayChatId: 'chat-1' });
+    older.lastActive = 100;
+    const newer = createConversation(settings, ['Rosa']);
+    setTetheredSettings(settings, newer.id, { tethered: true, roleplayChatId: 'chat-1' });
+    newer.lastActive = 200;
+    assert.equal(findTetheredThreadForRoleplay(settings, ['Rosa'], 'chat-1').id, newer.id);
 });
 
 test('getThreadsFor sorts most-recent-first', () => {
