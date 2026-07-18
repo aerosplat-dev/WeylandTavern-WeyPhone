@@ -75,3 +75,15 @@ test('getSettings backfills the new phoneApps cache on pre-milestone-7 settings'
     const settings = getSettings(extensionSettings);
     assert.deepEqual(settings.phoneApps, {});
 });
+
+test('defaultSettings no longer carries the removed global nickname pools', () => {
+    assert.equal('userNicknames' in defaultSettings, false);
+    assert.equal('characterNicknames' in defaultSettings, false);
+});
+
+test('getSettings drops any pre-existing global nickname pools on load', () => {
+    const extensionSettings = { [MODULE_NAME]: { conversations: {}, userNicknames: ['x'], characterNicknames: { A: 'b' } } };
+    const settings = getSettings(extensionSettings);
+    assert.equal('userNicknames' in settings, false);
+    assert.equal('characterNicknames' in settings, false);
+});

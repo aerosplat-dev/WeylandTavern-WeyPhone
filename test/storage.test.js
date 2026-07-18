@@ -875,3 +875,10 @@ test('summarizeConversations carries displayName into the summary shape', () => 
     const summary = getAllConversationSummaries(settings)[0];
     assert.equal(summary.displayName, 'My Thread');
 });
+
+test('migrateConversationNameFields drops the removed global nickname pools', () => {
+    const settings = { conversations: {}, userNicknames: ['juicebox'], characterNicknames: { Blake: 'wolfy' } };
+    migrateConversationNameFields(settings);
+    assert.equal('userNicknames' in settings, false);
+    assert.equal('characterNicknames' in settings, false);
+});
