@@ -1521,6 +1521,49 @@
     padding-bottom: 32px;
 }
 
+/* Rename Thread / Set Nickname overlay (renderThreadNameOverlay) — lives INSIDE #wp-portal, same
+   floating-frame convention as Configure-Nicknames/Import-from-Scenario above, reusing the
+   .wp-nick-frame/.wp-nick-actions classes verbatim. This block was originally missing entirely —
+   the overlay's own id had NO rule at all, so it rendered as an unpositioned, unstyled, z-index-less
+   block: invisible/inaccessible behind #wp-panel on mobile (where the panel becomes a full-screen,
+   z-index:9999 sheet) and only accidentally visible on desktop's small floating panel. Fixed to
+   match the other three overlays exactly. */
+#wp-thread-name-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    pointer-events: auto;
+}
+#wp-thread-name-overlay .wp-nick-frame {
+    width: min(420px, 92vw);
+    max-height: 88vh;
+    overflow-y: auto;
+    background: var(--SmartThemeBlurTintColor, #1b1b1f);
+    color: var(--SmartThemeBodyColor, #e6e6e6);
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 12px;
+    /* Extra top clearance for mobile browsers' floating top chrome — same reasoning as
+       #wp-nickname-config-overlay's own top padding. */
+    padding: 32px 20px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+#wp-thread-name-overlay h3 { margin: 0 0 12px; }
+#wp-thread-name-overlay p { margin: 0 0 12px; }
+#wp-thread-name-overlay input[type="text"] { width: 100%; box-sizing: border-box; }
+#wp-thread-name-overlay .wp-nick-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+    /* See the matching comment on #wp-nickname-config-overlay .wp-nick-actions above — same
+       mobile-browser-chrome clearance reasoning. */
+    padding-bottom: 32px;
+}
+
 /* WeyPhone confirm dialog — the shared Yes/No overlay used by the tether/untether flows.
    Same floating-frame convention as Configure-Nicknames/Import-from-Scenario above (lives INSIDE
    #wp-portal — position:absolute, not fixed, for the same mobile containing-block reason
