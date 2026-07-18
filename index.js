@@ -2322,6 +2322,28 @@ function initPanel() {
 }
 
 /**
+ * Fetches WeyPhone's settings.html via SillyTavern's renderExtensionTemplateAsync, retrying a
+ * few times on failure before giving up. This call fires the moment WeyPhone's script runs on
+ * page load, which can race the server still finishing its own startup (extension static routes
+ * not mounted yet) — a transient 404 in that window, not a broken/missing file. ST's own
+ * renderTemplateAsync (public/scripts/templates.js) swallows fetch/compile errors internally
+ * (toasting its own "Error rendering template" each time) and resolves `undefined` rather than
+ * throwing, so a failed attempt is detected here by a falsy result, not a caught exception.
+ * @param {ReturnType<typeof SillyTavern.getContext>} context
+ * @param {number} attempts total attempts before giving up
+ * @param {number} delayMs delay between attempts
+ * @returns {Promise<string | undefined>}
+ */
+async function fetchSettingsTemplateWithRetry(context, attempts = 3, delayMs = 500) {
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        const template = await context.renderExtensionTemplateAsync('third-party/Weyland-WeyPhone', 'settings');
+        if (template) return template;
+        if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return undefined;
+}
+
+/**
  * Renders WeyPhone's own drawer into SillyTavern's native extension settings panel
  * (#extensions_settings2 — the same standard location Weyland-Proofreader uses, NOT a custom
  * WeyPhone-built modal), so users can point WeyPhone's own generation at a different Connection
@@ -2333,11 +2355,10 @@ function initPanel() {
 async function initExtensionSettingsPanel() {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
-    const template = await context.renderExtensionTemplateAsync('third-party/Weyland-WeyPhone', 'settings');
-    // renderExtensionTemplateAsync (SillyTavern core) swallows its own fetch/compile errors and
-    // resolves `undefined` instead of throwing (see public/scripts/templates.js) — ST already
-    // toasts that failure itself, so this just has to not compound it. Without this guard,
-    // insertAdjacentHTML coerces `undefined` to the literal string "undefined", dumping that text
+    const template = await fetchSettingsTemplateWithRetry(context);
+    // Every retry already failed and ST has already toasted the failure itself (see
+    // fetchSettingsTemplateWithRetry) — bail out cleanly instead of feeding `undefined` into
+    // insertAdjacentHTML, which would coerce to the literal string "undefined" and dump that text
     // where the whole drawer (title, expansion arrow, every control) should be.
     if (!template) return;
     const container = document.getElementById('extensions_settings2');
