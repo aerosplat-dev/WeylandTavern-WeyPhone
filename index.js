@@ -779,6 +779,14 @@ function refreshVisibleScreen() {
         return;
     }
     if (currentView === 'conversation' && currentConversationId) {
+        // Keep the open-thread header in sync with the current displayName. #wp-panel-title is
+        // otherwise only set when the conversation view is opened (see showScreen, ~index.js:1887),
+        // so without this a live displayName change — a manual "Rename Thread" OR an auto-name stamp
+        // (deriveAutoDisplayName) from a Hijack append into the thread being viewed — would leave a
+        // stale header until the thread was reopened.
+        const conversation = getConversation(getSettings(SillyTavern.getContext().extensionSettings), currentConversationId);
+        const titleEl = document.getElementById('wp-panel-title');
+        if (conversation && titleEl) titleEl.textContent = resolveThreadDisplayName(conversation);
         rerenderConversationMessages();
     }
 }
@@ -2665,7 +2673,7 @@ function renderThreadNameOverlay(field) {
         setConversationNames(settings, conversation.id, { [field]: trimmed || null });
         context.saveSettingsDebounced();
         overlay.remove();
-        refreshVisibleScreen();
+        refreshVisibleScreen(); // also live-updates #wp-panel-title (conversation branch) on rename
     };
     saveBtn.addEventListener('click', commit);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
