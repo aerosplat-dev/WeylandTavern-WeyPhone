@@ -35,6 +35,9 @@ import {
     genTimestamp,
     DEFAULT_MEMORY_PRIMARY_MODEL,
     DEFAULT_MEMORY_BACKUP_MODEL,
+    setConversationNames,
+    deriveAutoDisplayName,
+    migrateConversationNameFields,
 } from '../lib/storage.js';
 
 test('genTimestamp returns Date.now() when it is ahead of the last recorded timestamp (normal branch)', () => {
@@ -809,4 +812,66 @@ test('getVisibleThreadsFor filters by participants AND visibility', () => {
     setTetheredSettings(settings, hidden.id, { tethered: true, roleplayChatId: 'chat-OTHER' });
     const ids = getVisibleThreadsFor(settings, ['Rosa'], 'chat-1').map(s => s.id);
     assert.deepEqual(ids, [shown.id]);
+});
+
+test('createConversation seeds displayName and userNickname as null', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, ['Rosa']);
+    assert.equal(conversation.displayName, null);
+    assert.equal(conversation.userNickname, null);
+});
+
+test('setConversationNames sets displayName and userNickname strings', () => {
+    const settings = { conversations: {} };
+    const c = createConversation(settings, ['Belle', 'Summer']);
+    setConversationNames(settings, c.id, { displayName: 'Wolf Pack', userNickname: 'sweetpea' });
+    assert.equal(getConversation(settings, c.id).displayName, 'Wolf Pack');
+    assert.equal(getConversation(settings, c.id).userNickname, 'sweetpea');
+});
+
+test('setConversationNames applies an explicit null but leaves an omitted field unchanged', () => {
+    const settings = { conversations: {} };
+    const c = createConversation(settings, ['Rosa']);
+    setConversationNames(settings, c.id, { displayName: 'Nickname', userNickname: 'x' });
+    setConversationNames(settings, c.id, { displayName: null }); // userNickname omitted
+    assert.equal(getConversation(settings, c.id).displayName, null);
+    assert.equal(getConversation(settings, c.id).userNickname, 'x'); // unchanged
+});
+
+test('setConversationNames returns undefined for an unknown conversation', () => {
+    const settings = { conversations: {} };
+    assert.equal(setConversationNames(settings, 'nope', { displayName: 'x' }), undefined);
+});
+
+test('deriveAutoDisplayName stamps a trimmed title when displayName is null', () => {
+    assert.equal(deriveAutoDisplayName({ displayName: null }, '  Wolf Pack  '), 'Wolf Pack');
+    assert.equal(deriveAutoDisplayName({}, 'Wolf Pack'), 'Wolf Pack'); // undefined treated as unset
+});
+
+test('deriveAutoDisplayName is sticky once displayName is set', () => {
+    assert.equal(deriveAutoDisplayName({ displayName: 'Wolf Pack' }, 'Different Title'), null);
+});
+
+test('deriveAutoDisplayName returns null for a blank or non-string title', () => {
+    assert.equal(deriveAutoDisplayName({ displayName: null }, '   '), null);
+    assert.equal(deriveAutoDisplayName({ displayName: null }, null), null);
+    assert.equal(deriveAutoDisplayName({ displayName: null }, undefined), null);
+});
+
+test('migrateConversationNameFields backfills null name fields and is idempotent', () => {
+    const settings = { conversations: { c1: { id: 'c1', participants: ['Rosa'], messages: [] } } };
+    migrateConversationNameFields(settings);
+    assert.equal(settings.conversations.c1.displayName, null);
+    assert.equal(settings.conversations.c1.userNickname, null);
+    settings.conversations.c1.displayName = 'Keep';
+    migrateConversationNameFields(settings);
+    assert.equal(settings.conversations.c1.displayName, 'Keep'); // not clobbered
+});
+
+test('summarizeConversations carries displayName into the summary shape', () => {
+    const settings = { conversations: {} };
+    const c = createConversation(settings, ['Rosa']);
+    setConversationNames(settings, c.id, { displayName: 'My Thread' });
+    const summary = getAllConversationSummaries(settings)[0];
+    assert.equal(summary.displayName, 'My Thread');
 });

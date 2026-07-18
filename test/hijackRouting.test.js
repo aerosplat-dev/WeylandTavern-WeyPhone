@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveHijackSpeaker, resolveUserReference, evaluateScope, dedupeRecap, planScopeCapture, shouldProcessHijackMessage } from '../lib/hijackRouting.js';
+import { resolveHijackSpeaker, resolveUserReference, evaluateScope, dedupeRecap, planScopeCapture, shouldProcessHijackMessage, BUILT_IN_USER_NICKNAMES_BY_CHARACTER } from '../lib/hijackRouting.js';
 import { ROSTER } from './helpers.js';
 
 test('resolveHijackSpeaker matches a bare entryName case-insensitively (canonical casing returned)', () => {
@@ -279,4 +279,12 @@ test('planScopeCapture does NOT route into a thread tethered to a DIFFERENT role
     const plan = planScopeCapture(scope1, decision, ctx, settings);
     assert.equal(plan.captured, true);
     assert.equal(plan.existingConversationId, null); // fresh — the other roleplay's thread is never touched
+});
+
+test('BUILT_IN_USER_NICKNAMES_BY_CHARACTER is exactly the three spec entries', () => {
+    assert.deepEqual(BUILT_IN_USER_NICKNAMES_BY_CHARACTER, {
+        Summer: 'juicebox',
+        Belle: 'wolfmeat',
+        Indigo: 'pookie',
+    });
 });
