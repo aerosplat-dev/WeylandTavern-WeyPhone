@@ -2,7 +2,7 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor, sameParticipants, findTetheredThreadForRoleplay } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, sameParticipants, findTetheredThreadForRoleplay, isConversationVisible, getVisibleConversationSummaries, getVisibleThreadsFor } from './lib/storage.js';
 import { buildSystemPrompt, buildGroupSystemPrompt, buildMessages, resolveProfileId, resolveModelOverride, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
 import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen, setRegistrarToggleState } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
@@ -436,7 +436,7 @@ function updateSelectModeUI() {
 function renderMessagesScreenNow(context, settings) {
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return;
-    const summaries = withTypingState(getAllConversationSummaries(settings), generatingConversationIds);
+    const summaries = withTypingState(getVisibleConversationSummaries(settings, context.chatId), generatingConversationIds);
     const allParticipantNames = summaries.flatMap(summary => summary.participants);
     const portraitMap = buildPortraitMap(context.characters, allParticipantNames, context.getThumbnailUrl, castRosterPortraitSlugs);
     renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
@@ -448,7 +448,7 @@ function renderMessagesScreenNow(context, settings) {
 function renderThreadsScreenNow(context, settings) {
     const screenBody = document.getElementById('wp-screen-body');
     if (!screenBody) return null;
-    const summaries = withTypingState(getThreadsFor(settings, currentThreadsFilter ?? []), generatingConversationIds);
+    const summaries = withTypingState(getVisibleThreadsFor(settings, currentThreadsFilter ?? [], context.chatId), generatingConversationIds);
     const portraitMap = buildPortraitMap(context.characters, currentThreadsFilter ?? [], context.getThumbnailUrl, castRosterPortraitSlugs);
     renderMessagesScreen(screenBody, summaries, formatRelativeTime, portraitMap);
     return portraitMap;
@@ -814,7 +814,9 @@ function accrueUnread(settings, conversationId, incrementCount) {
 function refreshUnreadBadges() {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
-    const total = Object.values(settings.conversations).reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
+    const total = Object.values(settings.conversations)
+        .filter(c => isConversationVisible(c, context.chatId))
+        .reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
     const label = total > 99 ? '99+' : String(total);
     for (const id of ['wp-toggle-unread-badge', 'wp-messages-tile-unread-badge']) {
         const badge = document.getElementById(id);
@@ -1440,7 +1442,10 @@ function handleDeleteConversation(id) {
         currentConversationId = null;
     }
     if (currentView === 'threads') {
-        const remaining = getThreadsFor(settings, currentThreadsFilter ?? []);
+        // Must use the visibility-filtered lookup, not the raw getThreadsFor: otherwise a hidden
+        // sibling thread (tethered elsewhere) could count as "remaining" and strand the user on an
+        // empty threads screen instead of routing them back to Messages.
+        const remaining = getVisibleThreadsFor(settings, currentThreadsFilter ?? [], context.chatId);
         showScreen(remaining.length === 0 ? 'messages' : 'threads');
         return;
     }
@@ -1765,7 +1770,9 @@ function showScreen(view) {
         title.textContent = 'Home';
         renderPanelAvatar(document.getElementById('wp-panel-avatar'), null);
         const flavorAppsEnabled = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
-        const messagesUnreadTotal = Object.values(settings.conversations).reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
+        const messagesUnreadTotal = Object.values(settings.conversations)
+            .filter(c => isConversationVisible(c, context.chatId))
+            .reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
         renderAppGridScreen(screenBody, { flavorAppsEnabled, messagesUnreadTotal });
         return;
     }

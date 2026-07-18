@@ -29,6 +29,9 @@ import {
     findTetheredThreadForRoleplay,
     migrateParticipantsField,
     migrateUnreadCountField,
+    isConversationVisible,
+    getVisibleConversationSummaries,
+    getVisibleThreadsFor,
     genTimestamp,
     DEFAULT_MEMORY_PRIMARY_MODEL,
     DEFAULT_MEMORY_BACKUP_MODEL,
@@ -757,4 +760,53 @@ test('getAllConversationSummaries carries unreadCount through', () => {
     } };
     const summaries = getAllConversationSummaries(settings);
     assert.equal(summaries[0].unreadCount, 3);
+});
+
+test('summarizeConversations output now includes the tethered flag', () => {
+    const settings = { conversations: {} };
+    const conversation = createConversation(settings, ['Rosa']);
+    setTetheredSettings(settings, conversation.id, { tethered: true, roleplayChatId: 'chat-1' });
+    const summary = getAllConversationSummaries(settings)[0];
+    assert.equal(summary.tethered, true);
+});
+
+test('isConversationVisible: untethered thread is always visible', () => {
+    assert.equal(isConversationVisible({ tethered: false, roleplayChatId: null }, 'chat-1'), true);
+    assert.equal(isConversationVisible({ tethered: false, roleplayChatId: null }, null), true);
+});
+
+test('isConversationVisible: tethered thread hidden when scoped to a different chat', () => {
+    assert.equal(isConversationVisible({ tethered: true, roleplayChatId: 'chat-OTHER' }, 'chat-1'), false);
+});
+
+test('isConversationVisible: tethered thread visible when scoped to the active chat', () => {
+    assert.equal(isConversationVisible({ tethered: true, roleplayChatId: 'chat-1' }, 'chat-1'), true);
+});
+
+test('isConversationVisible: no active roleplay (null/undefined activeChatId) hides nothing', () => {
+    assert.equal(isConversationVisible({ tethered: true, roleplayChatId: 'chat-1' }, null), true);
+    assert.equal(isConversationVisible({ tethered: true, roleplayChatId: 'chat-1' }, undefined), true);
+});
+
+test('getVisibleConversationSummaries excludes a tethered thread scoped elsewhere, keeps the rest', () => {
+    const settings = { conversations: {} };
+    const here = createConversation(settings, ['Rosa']);
+    setTetheredSettings(settings, here.id, { tethered: true, roleplayChatId: 'chat-1' });
+    const elsewhere = createConversation(settings, ['Ava']);
+    setTetheredSettings(settings, elsewhere.id, { tethered: true, roleplayChatId: 'chat-OTHER' });
+    const untethered = createConversation(settings, ['Belle']);
+    const ids = getVisibleConversationSummaries(settings, 'chat-1').map(s => s.id);
+    assert.ok(ids.includes(here.id));
+    assert.ok(ids.includes(untethered.id));
+    assert.ok(!ids.includes(elsewhere.id));
+});
+
+test('getVisibleThreadsFor filters by participants AND visibility', () => {
+    const settings = { conversations: {} };
+    const shown = createConversation(settings, ['Rosa']);
+    setTetheredSettings(settings, shown.id, { tethered: true, roleplayChatId: 'chat-1' });
+    const hidden = createConversation(settings, ['Rosa']);
+    setTetheredSettings(settings, hidden.id, { tethered: true, roleplayChatId: 'chat-OTHER' });
+    const ids = getVisibleThreadsFor(settings, ['Rosa'], 'chat-1').map(s => s.id);
+    assert.deepEqual(ids, [shown.id]);
 });

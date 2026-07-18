@@ -1537,3 +1537,10 @@
     gap: 8px;
     margin-top: 16px;
 }
+
+.wp-tether-chain {
+    font-size: 0.72em;
+    opacity: 0.75;
+    margin-left: 4px;
+    vertical-align: baseline;
+}
