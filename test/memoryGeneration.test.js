@@ -1,7 +1,7 @@
 // test/memoryGeneration.test.js
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from '../lib/memoryGeneration.js';
+import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest, resolveMemoryPersona } from '../lib/memoryGeneration.js';
 
 test('buildMemoryGenerationMessages returns a system+user message pair', () => {
     const windowMessages = [
@@ -82,6 +82,43 @@ test('buildMemoryGenerationMessages user message contains the phone-format trans
     });
     assert.match(messages[1].content, /Outgoing¦T1000¦Ava¦hey/);
     assert.match(messages[1].content, /Incoming¦T2000¦Rosa¦hi there/);
+});
+
+test('resolveMemoryPersona passes a solo participant through verbatim (no ## wrapping) — preserves solo-full-bot behavior exactly', () => {
+    const persona = resolveMemoryPersona([{ entryName: 'Rosa', personalityText: 'Rosa is blunt and sarcastic.' }]);
+    assert.deepEqual(persona, { charName: 'Rosa', personalityText: 'Rosa is blunt and sarcastic.' });
+});
+
+test('resolveMemoryPersona solo with empty personality returns empty personalityText (buildMemoryGenerationMessages omits the section)', () => {
+    assert.deepEqual(resolveMemoryPersona([{ entryName: 'Rosa', personalityText: '' }]), { charName: 'Rosa', personalityText: '' });
+});
+
+test('resolveMemoryPersona joins a group: names comma-joined, personalities as ## blocks in participant order', () => {
+    const persona = resolveMemoryPersona([
+        { entryName: 'Nathan Ashford', personalityText: 'Nathan is...' },
+        { entryName: 'Emily Adler', personalityText: 'Emily is...' },
+    ]);
+    assert.equal(persona.charName, 'Nathan Ashford, Emily Adler');
+    assert.equal(persona.personalityText, '## Nathan Ashford\nNathan is...\n\n## Emily Adler\nEmily is...');
+});
+
+test('resolveMemoryPersona keeps every group member in charName but omits ## blocks for members with empty/whitespace personality', () => {
+    const persona = resolveMemoryPersona([
+        { entryName: 'Nathan Ashford', personalityText: 'Nathan is...' },
+        { entryName: 'Ghost', personalityText: '' },
+        { entryName: 'Emily Adler', personalityText: '   ' },
+    ]);
+    assert.equal(persona.charName, 'Nathan Ashford, Ghost, Emily Adler');
+    assert.equal(persona.personalityText, '## Nathan Ashford\nNathan is...');
+});
+
+test('resolveMemoryPersona group with all-empty personalities yields an empty personalityText', () => {
+    const persona = resolveMemoryPersona([
+        { entryName: 'A', personalityText: '' },
+        { entryName: 'B', personalityText: '' },
+    ]);
+    assert.equal(persona.charName, 'A, B');
+    assert.equal(persona.personalityText, '');
 });
 
 test('joinMemoriesForInjection returns an empty string for no memories', () => {

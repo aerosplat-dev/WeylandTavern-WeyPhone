@@ -14,7 +14,7 @@ import { locatePhoneScopes, stripPhoneScopes } from './lib/hijackParsing.js';
 import { shouldProcessHijackMessage, evaluateScope, planScopeCapture, dedupeRecap } from './lib/hijackRouting.js';
 import { findMostRecentAssistantMessage, undoCapture, scopeMatchesThreadParticipants, applyImportWipeRestore } from './lib/hijackManual.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
-import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
+import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest, resolveMemoryPersona } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
 import { resolveMainChatAnchor } from './lib/mainChatAnchor.js';
 import { buildMainChatInjectionPlan, planTetherExtensionPromptOps } from './lib/mainChatInjection.js';
@@ -885,22 +885,11 @@ function rerenderMemoryScreen() {
 async function generateMemory(conversationId, conversation, context, settings, options = {}) {
     const { silent = true, forcedWindow = null, replaceMemoryId = null } = options;
     if (memoryGeneratingConversationIds.has(conversationId)) return;
-    // Memory generation stays full-bot-solo-only for this milestone (matches Task 8's original
-    // scope — only generateReply's solo-conversation path branches on hasFullBotEntry). This used
-    // to rely entirely on resolveConversationCharacter/charPer.get returning nothing for a
-    // subbot-only conversation's first participant — which is correct for a PURE-subbot
-    // conversation, but silently wrong for a MIXED group whose first participant happens to be a
-    // full-bot character (e.g. participants: ["Belle", "Blake"]): resolveConversationCharacter
-    // would find Belle's real record and charPer.get would find her real config, so neither old
-    // guard fired, and a Belle+Blake group thread would get a memory framed entirely around
-    // Belle's persona alone, ignoring the group. Explicit length check makes the real boundary
-    // (groups don't get memory generation at all yet) correct regardless of which participant
-    // happens to be first or whether they have a full-bot.
-    if (conversation.participants.length > 1) return;
-    const character = resolveConversationCharacter(context, conversation.participants[0]);
-    if (!character) return;
-    const personalityConfig = charPer.get(character.name);
-    if (!personalityConfig) return;
+    // Task 0: memory generation now works for ANY thread shape — solo full-bot (unchanged), solo
+    // subbot-only, and any group (mixed or all-subbot). The old `participants.length > 1` and
+    // full-bot-only `charPer.get` guards that silently no-op'd groups and subbot threads are GONE.
+    // Persona resolution below mirrors generateReply's own branching EXACTLY so a memory is framed
+    // with the same persona content a real reply would use (see resolveMemoryPersona's rationale).
 
     try {
         memoryGeneratingConversationIds.add(conversationId);
@@ -911,22 +900,62 @@ async function generateMemory(conversationId, conversation, context, settings, o
             return;
         }
 
-        const personalityText = applySpecialCase(character.name, resolvePersonalityText(personalityConfig), {});
+        // One {entryName, personalityText} per participant, mirroring generateReply:
+        //  - group (2+): subbot personality for EVERY participant, even a full-bot (generateReply's
+        //    isGroup branch, index.js:997-1002).
+        //  - solo full-bot: charPer.js personality (+ applySpecialCase) — the case that already
+        //    worked, reproduced value-for-value so it cannot regress.
+        //  - solo subbot-only: subbot personality; a missing roster entry degrades to '' rather than
+        //    bailing, so a memory still generates (buildMemoryGenerationMessages omits an empty
+        //    personality section cleanly).
+        const isGroup = conversation.participants.length > 1;
+        let participantPersonas;
+        if (isGroup) {
+            const roster = await getCastRoster();
+            participantPersonas = conversation.participants.map((name) => {
+                const rosterEntry = roster.find(c => c.entryName === name);
+                const macroKey = rosterEntry ? rosterEntry.macroKey : null;
+                return { entryName: name, personalityText: macroKey ? resolveSubbotPersonality(strings, macroKey) : '' };
+            });
+        } else {
+            const entryName = conversation.participants[0];
+            if (hasFullBotEntry(entryName)) {
+                const character = resolveConversationCharacter(context, entryName);
+                const name = character ? character.name : entryName;
+                const personalityConfig = charPer.get(name);
+                const personalityText = personalityConfig
+                    ? applySpecialCase(name, resolvePersonalityText(personalityConfig), {})
+                    : '';
+                participantPersonas = [{ entryName: name, personalityText }];
+            } else {
+                const roster = await getCastRoster();
+                const rosterEntry = roster.find(c => c.entryName === entryName);
+                const personalityText = rosterEntry ? resolveSubbotPersonality(strings, rosterEntry.macroKey) : '';
+                participantPersonas = [{ entryName, personalityText }];
+            }
+        }
+        const persona = resolveMemoryPersona(participantPersonas);
+
         const userName = context.name1 || 'User';
+        // {{char}} in any participant's personality text resolves to the representative first
+        // participant, mirroring generateReply's own entryNameForMacros. persona.charName (all
+        // names, for the summary's "memory entry for ..." prose) is a separate concern from the
+        // macro charName.
+        const entryNameForMacros = conversation.participants[0];
         const messages = buildMemoryGenerationMessages({
-            charName: character.name,
-            personalityText,
+            charName: persona.charName,
+            personalityText: persona.personalityText,
             windowMessages: window.messages,
             userName,
             formatClockTime,
         });
-        // Same real-macro resolution as generateReply's system prompt — personalityText can
-        // itself contain macros (it comes from the same charper.js source as the main prompt).
+        // Same real-macro resolution as generateReply's system prompt — personalityText can itself
+        // contain macros (it comes from the same charper.js/strings.js source as the main prompt).
         messages[0].content = applyMacroSubstitution({
             substituteParams: context.substituteParams,
             content: messages[0].content,
             userName,
-            charName: character.name,
+            charName: entryNameForMacros,
         });
 
         const activeProfileId = context.extensionSettings.connectionManager?.selectedProfile ?? '';
