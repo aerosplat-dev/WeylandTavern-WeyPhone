@@ -2,7 +2,7 @@ import { MODULE_NAME, getSettings } from './lib/config.js';
 import { EXCLUDED_CHARACTER_NAMES } from './lib/characters.js';
 import { resolveMasterPrompt, resolvePostHistoryInstructions, resolvePersonalityText, applySpecialCase } from './lib/promptResolution.js';
 import { resolveWorldInfoTethered, resolveWorldInfoUntethered } from './lib/worldInfo.js';
-import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor } from './lib/storage.js';
+import { createConversation, getConversation, appendMessage, editMessage, deleteMessage, deleteMessages, deleteConversation, getAllConversationSummaries, genTimestamp, discardTrailingReply, createMemory, editMemory, deleteMemory, setMemoryPinned, getPinnedMemories, setMemorySettings, countExchangesSince, getMemoryWindow, getLastGeneratedMemory, setTetheredSettings, getThreadsFor, sameParticipants } from './lib/storage.js';
 import { buildSystemPrompt, buildGroupSystemPrompt, buildMessages, resolveProfileId, resolveModelOverride, sendMessage, reconstructHistoryAsPhoneFormat, applyMacroSubstitution, joinNonEmptySections, extractResponseText } from './lib/generation.js';
 import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderConversationScreen, renderMessages, renderPanelAvatar, setRegenerateMenuItemsEnabled, renderMemoryScreen, populateConnectionProfileOptions, setTetheredToggleState, renderAppGridScreen, renderPhoneAppScreen, renderTwitterFollowingScreen, renderTwitterProfileScreen, renderTwitterFeedScreen, renderHousingScreen, setRegistrarToggleState } from './lib/panel.js';
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
@@ -2532,11 +2532,15 @@ function renderImportScenarioOverlay() {
  * Runs the multi-scope engine across EVERY assistant-authored message in the active roleplay's
  * ENTIRE chat history (read-only — never strips/edits any source message, unlike live Hijack and
  * manual Capture), restricted via scopeMatchesThreadParticipants to scopes belonging to the
- * CURRENT thread's own participant set. wipeFirst=true (Yes) clears the thread's messages first
- * and rebuilds from every matching scope in chronological order; wipeFirst=false (No) keeps
- * existing messages and appends only genuinely new matches via the base engine's recap-dedup
- * (dedupeRecap), diffed against the thread's own stored tail so already-known content is never
- * duplicated.
+ * CURRENT thread's own participant set. wipeFirst=true (Yes) clears the thread's messages FIRST
+ * (before the scan runs), then rebuilds from every matching scope in chronological order --
+ * scanning-then-wiping instead would let planScopeCapture's internal findMostRecentThread dedupe
+ * every scope against this thread's still-live pre-wipe content, silently dropping content that
+ * should be rebuilt (see git history for the bug this fixed). The wipe is snapshotted and
+ * restored on any error mid-scan, so a throw partway through never leaves the thread permanently
+ * empty. wipeFirst=false (No) keeps existing messages and appends only genuinely new matches via
+ * the base engine's recap-dedup (dedupeRecap), diffed against the thread's own stored tail so
+ * already-known content is never duplicated.
  * @param {{wipeFirst: boolean, parseUnscoped: boolean}} options
  */
 function handleImportFromScenario({ wipeFirst, parseUnscoped }) {
@@ -2554,31 +2558,84 @@ function handleImportFromScenario({ wipeFirst, parseUnscoped }) {
         };
 
         const chat = context.chat ?? [];
-        const importedMessages = [];
-        for (const message of chat) {
-            if (!shouldProcessHijackMessage(message)) continue;
-            const scopes = locatePhoneScopes(message.mes);
-            for (const scope of scopes) {
-                const decision = evaluateScope(scope, ctx);
-                if (!decision.captured) continue;
-                const plan = planScopeCapture(scope, decision, ctx, settings);
-                if (!plan.captured) continue;
-                if (!scopeMatchesThreadParticipants(scope, decision, conversation.participants, plan.participants, parseUnscoped)) continue;
-                for (const msg of plan.messages) {
-                    importedMessages.push({
-                        role: msg.role,
-                        content: msg.content,
-                        ...(msg.speaker ? { speaker: msg.speaker } : {}),
-                        timestamp: genTimestamp(),
-                    });
+
+        const scanAndCollect = () => {
+            const importedMessages = [];
+            for (const message of chat) {
+                if (!shouldProcessHijackMessage(message)) continue;
+                const scopes = locatePhoneScopes(message.mes);
+                for (const scope of scopes) {
+                    const decision = evaluateScope(scope, ctx);
+                    if (!decision.captured) continue;
+                    const plan = planScopeCapture(scope, decision, ctx, settings);
+                    if (!plan.captured) continue;
+                    if (!scopeMatchesThreadParticipants(scope, decision, conversation.participants, plan.participants, parseUnscoped)) continue;
+                    for (const msg of plan.messages) {
+                        importedMessages.push({
+                            role: msg.role,
+                            content: msg.content,
+                            ...(msg.speaker ? { speaker: msg.speaker } : {}),
+                            timestamp: genTimestamp(),
+                        });
+                    }
                 }
             }
-        }
+            return importedMessages;
+        };
 
         if (wipeFirst) {
-            conversation.messages = [];
-            for (const msg of importedMessages) appendMessage(settings, conversation.id, msg);
+            // Wipe BEFORE scanning: planScopeCapture (called per-scope during the scan) internally
+            // dedupes each scope's messages against findMostRecentThread(settings, participants) --
+            // the most-recently-active thread with this exact participant set, which is NOT
+            // necessarily `conversation` itself (multi-conversation management allows more than one
+            // thread with the same participants; see getThreadsFor/storage.js). If ANY thread
+            // sharing this participant set still held its pre-wipe content while the scan ran, every
+            // scope whose content already existed there would dedupe to nothing and get silently
+            // dropped (captured: false) -- then wiping `conversation` would delete its own
+            // pre-existing content anyway, for a net loss, and a second Yes-run would be actively
+            // destructive (non-idempotent). So every thread sharing this participant set -- not just
+            // `conversation` -- is temporarily wiped before the scan, guaranteeing
+            // findMostRecentThread sees empty messages everywhere and every matching scope's content
+            // is treated as new. Only `conversation` is meant to end up rebuilt, though: every OTHER
+            // same-participant sibling is restored to its untouched original content afterward, so
+            // this never leaks a rebuild's side effects into an unrelated thread.
+            //
+            // Snapshot + try/catch/restore: the scan below can throw partway through (a malformed
+            // scope, an unexpected error in the engine). Without this, a mid-scan throw would leave
+            // every same-participant thread (including `conversation`) permanently wiped with no
+            // matching content ever appended. On any error, every snapshotted thread (conversation
+            // and siblings alike) is restored to its exact pre-wipe state before the error propagates
+            // to the outer catch (same catch-log-toast convention as the rest of this function).
+            const siblingThreads = Object.values(settings.conversations)
+                .filter(c => sameParticipants(c.participants, conversation.participants));
+            const snapshots = siblingThreads.map(c => ({
+                conv: c,
+                messages: c.messages,
+                lastActive: c.lastActive,
+                lastMemoryMessageIndex: c.lastMemoryMessageIndex,
+            }));
+            try {
+                for (const c of siblingThreads) c.messages = [];
+                const importedMessages = scanAndCollect();
+                for (const msg of importedMessages) appendMessage(settings, conversation.id, msg);
+                // Restore every OTHER same-participant thread -- only `conversation` should end up
+                // rebuilt; siblings were wiped solely so the dedup lookup above saw them empty too.
+                for (const snap of snapshots) {
+                    if (snap.conv === conversation) continue;
+                    snap.conv.messages = snap.messages;
+                    snap.conv.lastActive = snap.lastActive;
+                    snap.conv.lastMemoryMessageIndex = snap.lastMemoryMessageIndex;
+                }
+            } catch (innerError) {
+                for (const snap of snapshots) {
+                    snap.conv.messages = snap.messages;
+                    snap.conv.lastActive = snap.lastActive;
+                    snap.conv.lastMemoryMessageIndex = snap.lastMemoryMessageIndex;
+                }
+                throw innerError;
+            }
         } else {
+            const importedMessages = scanAndCollect();
             const remainder = dedupeRecap(importedMessages, conversation.messages);
             for (const msg of remainder) appendMessage(settings, conversation.id, msg);
         }
