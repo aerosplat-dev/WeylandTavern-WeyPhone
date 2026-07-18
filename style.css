@@ -1410,7 +1410,10 @@
     color: var(--SmartThemeBodyColor, #e6e6e6);
     border: 1px solid var(--SmartThemeBorderColor, #444);
     border-radius: 12px;
-    padding: 18px 20px;
+    /* Extra top clearance (same mobile-browser-chrome reasoning as the bottom padding on
+       .wp-nick-actions below) — some mobile browsers overlay a floating address bar at the top of
+       the viewport at the scroll-to-top resting position, which can clip the heading otherwise. */
+    padding: 32px 20px 18px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 #wp-nickname-config-overlay h3 { margin: 0 0 12px; }
@@ -1459,14 +1462,14 @@
 #wp-nickname-config-overlay .wp-nick-char-row input { flex: 1 1 auto; }
 #wp-nickname-config-overlay .wp-nick-error {
     color: #ff6b6b;
-    margin-top: 10px;
-    min-height: 1.2em;
+    margin-top: 4px;
+    min-height: 1em;
 }
 #wp-nickname-config-overlay .wp-nick-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    margin-top: 16px;
+    margin-top: 8px;
     /* Extra bottom clearance inside the frame's own scroll area — several mobile browsers
        (Safari's floating bottom toolbar, similar overlays elsewhere) paint UI chrome over the
        bottom of the viewport without it counting against reported viewport height, so a button
