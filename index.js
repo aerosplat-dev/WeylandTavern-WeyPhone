@@ -12,6 +12,7 @@ import { formatParticipantNames } from './lib/participants.js';
 import { parseReply, parseGroupReply } from './lib/messageParsing.js';
 import { locatePhoneScopes, stripPhoneScopes } from './lib/hijackParsing.js';
 import { shouldProcessHijackMessage, evaluateScope, planScopeCapture } from './lib/hijackRouting.js';
+import { findMostRecentAssistantMessage } from './lib/hijackManual.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
@@ -58,6 +59,11 @@ let currentPhoneApp = null; // 'chronicle' | 'discord' | 'yikyak' | null
 let currentTwitterProfileCharacter = null;
 let currentThreadsFilter = null; // participants string[] — set when entering the 'threads' view
 let groupSelectionMode = false; // true while the New Message screen is in group-selection mode
+// Single-slot undo cache for the manual "Undo Last Capture" tool (Task 2) — populated by
+// runHijackCaptureForMessage on every successful capture (automatic or manual), cleared by Undo.
+// Session-only (an in-memory object, like currentView/currentConversationId) — resets on reload,
+// which is acceptable since object-identity-based removal wouldn't survive a reload anyway.
+let lastCaptureSnapshot = null;
 let groupSelectionNames = []; // entryNames checked so far in group selection mode
 let contactSearchQuery = ''; // raw text currently in #wp-contact-search-input
 
@@ -2310,6 +2316,13 @@ async function initExtensionSettingsPanel() {
     if (nicknamesButton) {
         nicknamesButton.addEventListener('click', () => renderNicknameConfigFrame());
     }
+
+    const captureLastButton = document.getElementById('wp-settings-capture-last-button');
+    const undoCaptureButton = document.getElementById('wp-settings-undo-capture-button');
+    if (captureLastButton) captureLastButton.addEventListener('click', handleCaptureLastMessage);
+    if (undoCaptureButton) undoCaptureButton.addEventListener('click', handleUndoLastCapture);
+    refreshCaptureToolsAvailability();
+    context.eventSource.on(context.eventTypes.CHAT_CHANGED, refreshCaptureToolsAvailability);
 }
 
 /**
@@ -2500,11 +2513,101 @@ async function weyPhoneMainChatInterceptor() {
 globalThis.weyPhoneMainChatInterceptor = weyPhoneMainChatInterceptor;
 
 /**
- * SillyTavern MESSAGE_RECEIVED handler (registered in initPanel). Fully synchronous by design: it
- * must strip a captured phone block out of chat[messageId].mes BEFORE Weyland-Formatter's own
- * later-registered MESSAGE_RECEIVED handler reads that same field (WeyPhone loading_order 150 <
- * Formatter's 400). Reads the roster from the synchronous castRosterEntries snapshot (never awaits).
- * Gated on BOTH experimental flags; skips user/system/no-text messages via shouldProcessHijackMessage.
+ * The shared per-message capture pipeline: locate scopes -> evaluate -> plan -> append -> strip.
+ * Used by BOTH the live MESSAGE_RECEIVED handler (weyPhoneHijackHandler below) and the manual
+ * "Capture Last Message" button (handleCaptureLastMessage below) — this is the single write site
+ * that also populates lastCaptureSnapshot (the Undo cache, see Task 2), so both paths populate the
+ * same cache rather than needing separate write sites. Fully synchronous, same reasoning as the
+ * handler this was extracted from: it must strip a captured phone block out of chat[messageId].mes
+ * BEFORE Weyland-Formatter's own later-registered MESSAGE_RECEIVED handler reads that same field
+ * (WeyPhone loading_order 150 < Formatter's 400) when called from the live path. Does NOT itself
+ * call context.updateMessageBlock/context.saveChat for the source message — the live
+ * MESSAGE_RECEIVED path relies on ST's own native post-event render/save (unchanged from before
+ * this refactor); the manual button path (which fires with no such pipeline about to run) does
+ * that explicitly at its own call site instead.
+ * @param {ReturnType<typeof SillyTavern.getContext>} context
+ * @param {ReturnType<typeof getSettings>} settings
+ * @param {number} messageId
+ * @returns {boolean} true if anything was captured (i.e. message.mes was stripped)
+ */
+function runHijackCaptureForMessage(context, settings, messageId) {
+    const chat = context.chat;
+    const message = chat?.[messageId];
+    if (!shouldProcessHijackMessage(message)) return false;
+
+    const scopes = locatePhoneScopes(message.mes);
+    if (!scopes.length) return false;
+
+    const ctx = {
+        userName: context.name1 || 'User',
+        userNicknames: settings.userNicknames,
+        castRoster: castRosterEntries,
+        characterNicknames: settings.characterNicknames,
+    };
+
+    const preCaptureText = message.mes;
+    const affectedConversations = [];
+
+    // Each scope is evaluated, routed, and captured/skipped completely independently.
+    const capturedScopes = [];
+    const toastParticipantSets = [];
+    for (const scope of scopes) {
+        const decision = evaluateScope(scope, ctx);
+        if (!decision.captured) continue;
+        const plan = planScopeCapture(scope, decision, ctx, settings);
+        if (!plan.captured) continue;
+
+        let conversation = plan.existingConversationId
+            ? getConversation(settings, plan.existingConversationId)
+            : null;
+        const wasNewlyCreated = !conversation;
+        if (!conversation) {
+            conversation = createConversation(settings, plan.participants);
+            // Brand-new hijacked threads start tethered so they round-trip into the roleplay on
+            // the very next generation without a manual step.
+            setTetheredSettings(settings, conversation.id, { tethered: true });
+        }
+        const appendedMessages = [];
+        for (const msg of plan.messages) {
+            const stored = {
+                role: msg.role,
+                content: msg.content,
+                ...(msg.speaker ? { speaker: msg.speaker } : {}),
+                timestamp: genTimestamp(),
+            };
+            appendMessage(settings, conversation.id, stored);
+            appendedMessages.push(stored);
+        }
+        accrueUnread(settings, conversation.id, plan.unreadIncrement);
+        capturedScopes.push(scope);
+        toastParticipantSets.push(plan.participants);
+        affectedConversations.push({ conversationId: conversation.id, appendedMessages, wasNewlyCreated });
+    }
+
+    if (!capturedScopes.length) return false;
+
+    // Strip only the captured scopes' lines out of the roleplay message. Uncaptured scopes and
+    // narrative are left untouched.
+    message.mes = stripPhoneScopes(message.mes, capturedScopes);
+
+    // Single-slot undo cache — overwritten on every successful capture (automatic or manual), not
+    // a history stack. Stores the message OBJECT REFERENCES that were appended (matched by
+    // identity on Undo, not by count/index) and whether each conversation was newly created.
+    lastCaptureSnapshot = { messageId, preCaptureText, affectedConversations };
+
+    context.saveSettingsDebounced();
+    refreshUnreadBadges();
+    refreshVisibleScreen();
+    for (const participants of toastParticipantSets) {
+        toastr.info(`New message from ${formatParticipantNames(participants)}`, 'WeyPhone');
+    }
+    return true;
+}
+
+/**
+ * SillyTavern MESSAGE_RECEIVED handler (registered in initPanel). Fully synchronous by design —
+ * see runHijackCaptureForMessage's doc comment. Gated on BOTH experimental flags; delegates its
+ * actual work to the shared pipeline.
  * @param {number} messageId
  */
 function weyPhoneHijackHandler(messageId) {
@@ -2512,68 +2615,77 @@ function weyPhoneHijackHandler(messageId) {
         const context = SillyTavern.getContext();
         const settings = getSettings(context.extensionSettings);
         if (!settings.hijackEnabled || !settings.bidirectionalTetheringEnabled) return;
-
-        const chat = context.chat;
-        const message = chat?.[messageId];
-        if (!shouldProcessHijackMessage(message)) return;
-
-        const scopes = locatePhoneScopes(message.mes);
-        if (!scopes.length) return;
-
-        const ctx = {
-            userName: context.name1 || 'User',
-            userNicknames: settings.userNicknames,
-            castRoster: castRosterEntries,
-            characterNicknames: settings.characterNicknames,
-        };
-
-        // Each scope is evaluated, routed, and captured/skipped completely independently.
-        const capturedScopes = [];
-        const toastParticipantSets = [];
-        for (const scope of scopes) {
-            const decision = evaluateScope(scope, ctx);
-            if (!decision.captured) continue;
-            const plan = planScopeCapture(scope, decision, ctx, settings);
-            if (!plan.captured) continue;
-
-            let conversation = plan.existingConversationId
-                ? getConversation(settings, plan.existingConversationId)
-                : null;
-            if (!conversation) {
-                conversation = createConversation(settings, plan.participants);
-                // Brand-new hijacked threads start tethered so they round-trip into the roleplay on
-                // the very next generation without a manual step.
-                setTetheredSettings(settings, conversation.id, { tethered: true });
-            }
-            for (const msg of plan.messages) {
-                appendMessage(settings, conversation.id, {
-                    role: msg.role,
-                    content: msg.content,
-                    ...(msg.speaker ? { speaker: msg.speaker } : {}),
-                    timestamp: genTimestamp(),
-                });
-            }
-            accrueUnread(settings, conversation.id, plan.unreadIncrement);
-            capturedScopes.push(scope);
-            toastParticipantSets.push(plan.participants);
-        }
-
-        if (!capturedScopes.length) return;
-
-        // Strip only the captured scopes' lines out of the roleplay message. Uncaptured scopes and
-        // narrative are left untouched. No explicit save/re-render of chat — mirrors
-        // Weyland-Formatter's precedent (relies on ST's native post-MESSAGE_RECEIVED pipeline).
-        message.mes = stripPhoneScopes(message.mes, capturedScopes);
-
-        context.saveSettingsDebounced();
-        refreshUnreadBadges();
-        refreshVisibleScreen();
-        for (const participants of toastParticipantSets) {
-            toastr.info(`New message from ${formatParticipantNames(participants)}`, 'WeyPhone');
-        }
+        runHijackCaptureForMessage(context, settings, messageId);
     } catch (error) {
         console.error(`[${MODULE_NAME}] Hijack capture failed:`, error);
     }
+}
+
+/**
+ * "Capture Last Message" button handler (extension-settings panel). Manually re-runs capture
+ * against the most recent assistant-authored message in the active roleplay chat, without needing
+ * a fresh generation — recovers from cases where the live MESSAGE_RECEIVED handler didn't fire
+ * (e.g. a swipe anomaly) and lets a user re-run capture after adjusting nickname configuration.
+ * Per spec, enablement is ONLY "no active roleplay" / "no assistant message found" (see
+ * refreshCaptureToolsAvailability) — deliberately NOT gated on hijackEnabled or
+ * bidirectionalTetheringEnabled the way the live automatic handler is, since this manual tool
+ * exists specifically to work even when the automatic path (which those flags gate) failed or is
+ * off. Unlike the live handler, this path explicitly re-renders/saves the source chat message
+ * afterward, since no native post-MESSAGE_RECEIVED pipeline is about to do that for it.
+ */
+function handleCaptureLastMessage() {
+    try {
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        const messageId = findMostRecentAssistantMessage(context.chat);
+        if (messageId === null) {
+            toastr.info('No assistant message found in the active chat to capture from.', 'WeyPhone');
+            return;
+        }
+        const captured = runHijackCaptureForMessage(context, settings, messageId);
+        if (!captured) {
+            toastr.info('Nothing recognized to capture in the most recent message.', 'WeyPhone');
+            return;
+        }
+        const message = context.chat[messageId];
+        context.updateMessageBlock(messageId, message);
+        context.saveChat();
+        refreshCaptureToolsAvailability();
+        toastr.success('Captured into WeyPhone.', 'WeyPhone');
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Manual capture failed:`, error);
+        toastr.error(error.message, 'WeyPhone');
+    }
+}
+
+/**
+ * Enables/disables both capture-tool buttons per the spec's gating: Capture Last Message is
+ * greyed out with no active main-chat roleplay OR no assistant message to capture from; Undo
+ * Last Capture is greyed out with no active main-chat roleplay OR an empty undo cache. Called on
+ * init and on every CHAT_CHANGED (mirrors updateTetheredToggleAvailability's own trigger, index.js
+ * ~line 2207-2209), plus explicitly after every successful capture/undo.
+ */
+function refreshCaptureToolsAvailability() {
+    const captureLastButton = document.getElementById('wp-settings-capture-last-button');
+    const undoCaptureButton = document.getElementById('wp-settings-undo-capture-button');
+    if (!captureLastButton && !undoCaptureButton) return;
+    const context = SillyTavern.getContext();
+    const roleplayActive = isMainRoleplayActive({ characterId: context.characterId, groupId: context.groupId });
+    if (captureLastButton) {
+        captureLastButton.disabled = !roleplayActive || findMostRecentAssistantMessage(context.chat) === null;
+    }
+    if (undoCaptureButton) {
+        undoCaptureButton.disabled = !roleplayActive || lastCaptureSnapshot === null;
+    }
+}
+
+/**
+ * Temporary stub for Task 2's real Undo implementation — kept as a no-op so index.js stays
+ * loadable and the button wiring in initExtensionSettingsPanel has something to call until Task 2
+ * lands. Removed in Task 2, Step 4.
+ */
+function handleUndoLastCapture() {
+    toastr.info('Undo Last Capture is not implemented yet.', 'WeyPhone');
 }
 
 jQuery(async () => {
