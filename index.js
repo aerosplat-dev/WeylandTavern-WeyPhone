@@ -2494,6 +2494,38 @@ function runTetherFlow(checkbox, conversationId) {
 }
 
 /**
+ * Dialog-gated untether flow (tethered -> untethered). Called from the wp-tethered-checkbox change
+ * handler when the user unchecks the box. Shows a single-message confirmation; on confirm clears the
+ * tether (tethered:false, roleplayChatId:null) — nothing is deleted, a future re-tether re-runs the
+ * checkpoint against whatever accumulated. On cancel reverts the checkbox to checked.
+ * @param {HTMLInputElement} checkbox
+ * @param {string} conversationId
+ */
+function runUntetherFlow(checkbox, conversationId) {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, conversationId);
+    if (!conversation) { checkbox.checked = false; return; }
+
+    showWeyPhoneConfirmDialog({
+        title: 'Untether this thread?',
+        messages: [
+            "Untethering will lose this thread's anchor points — if you tether it again later, any messages from before that point will need a fresh memory checkpoint.",
+        ],
+        confirmLabel: 'Untether',
+        cancelLabel: 'Cancel',
+        onCancel: () => { checkbox.checked = true; },
+        onConfirm: () => {
+            setTetheredSettings(settings, conversationId, { tethered: false, roleplayChatId: null });
+            context.saveSettingsDebounced();
+            checkbox.checked = false;
+            updateTetheredToggleAvailability();
+            refreshUnreadBadges();
+        },
+    });
+}
+
+/**
  * Builds and shows the floating Configure-Nicknames frame OUTSIDE #wp-portal (its own DOM/z-index
  * context, z-index 1000000). Left section: a comma/Enter-committed tag-chip editor for
  * userNicknames. Right section: one text field per roster contact for characterNicknames. Validates
