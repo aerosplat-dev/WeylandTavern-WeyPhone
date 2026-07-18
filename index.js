@@ -12,7 +12,7 @@ import { formatParticipantNames } from './lib/participants.js';
 import { parseReply, parseGroupReply } from './lib/messageParsing.js';
 import { locatePhoneScopes, stripPhoneScopes } from './lib/hijackParsing.js';
 import { shouldProcessHijackMessage, evaluateScope, planScopeCapture } from './lib/hijackRouting.js';
-import { findMostRecentAssistantMessage } from './lib/hijackManual.js';
+import { findMostRecentAssistantMessage, undoCapture } from './lib/hijackManual.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
@@ -2680,12 +2680,34 @@ function refreshCaptureToolsAvailability() {
 }
 
 /**
- * Temporary stub for Task 2's real Undo implementation — kept as a no-op so index.js stays
- * loadable and the button wiring in initExtensionSettingsPanel has something to call until Task 2
- * lands. Removed in Task 2, Step 4.
+ * "Undo Last Capture" button handler (extension-settings panel). Reverses the single most recent
+ * capture (automatic or manual), symmetrically: restores the source chat message's pre-capture
+ * text and removes exactly the cached appended message objects (by identity, not count) from each
+ * affected conversation, deleting any conversation the capture had newly created. Clears the cache
+ * afterward — a second click with nothing left to undo is a no-op (button is greyed out for this
+ * case anyway, see refreshCaptureToolsAvailability).
  */
 function handleUndoLastCapture() {
-    toastr.info('Undo Last Capture is not implemented yet.', 'WeyPhone');
+    try {
+        if (lastCaptureSnapshot === null) return;
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        const snapshot = lastCaptureSnapshot;
+        undoCapture(settings, snapshot, context.chat);
+        if (snapshot.messageId !== null && context.chat?.[snapshot.messageId]) {
+            context.updateMessageBlock(snapshot.messageId, context.chat[snapshot.messageId]);
+            context.saveChat();
+        }
+        lastCaptureSnapshot = null;
+        context.saveSettingsDebounced();
+        refreshUnreadBadges();
+        refreshVisibleScreen();
+        refreshCaptureToolsAvailability();
+        toastr.success('Last capture undone.', 'WeyPhone');
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Undo capture failed:`, error);
+        toastr.error(error.message, 'WeyPhone');
+    }
 }
 
 jQuery(async () => {
