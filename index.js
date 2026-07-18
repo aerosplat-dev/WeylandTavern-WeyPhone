@@ -2321,6 +2321,43 @@ function initPanel() {
     refreshUnreadBadges();
 }
 
+// SillyTavern derives an extension's renderExtensionTemplateAsync id from where its folder
+// physically lives, not from manifest.json: 'third-party/<Name>' under a user's own
+// data/<user>/extensions/ (the documented house convention this extension follows), but just
+// '<Name>' if it's ever deployed directly under the bundled public/scripts/extensions/ tree
+// instead. A hardcoded assumption of one or the other 404s consistently — immune to restarts or
+// cache-clearing — whenever the actual deployment doesn't match the guess, while the rest of the
+// extension (manifest.json/index.js/style.css, all served through generic static serving) keeps
+// working fine. This already happened once before to Weyland-Proofreader (see its own index.js
+// TEMPLATE_NAME comment). Tried in this order — third-party first, since that's the documented
+// convention — and cached once resolved, since an extension's install location can't change
+// mid-session.
+const WEYPHONE_EXTENSION_NAME_CANDIDATES = ['third-party/Weyland-WeyPhone', 'Weyland-WeyPhone'];
+let cachedExtensionTemplateName = null;
+
+/**
+ * Determines which of WEYPHONE_EXTENSION_NAME_CANDIDATES actually resolves on this server, via a
+ * silent HEAD request against each candidate's settings.html URL — the same static route
+ * renderExtensionTemplateAsync's own fetch hits, but without invoking ST's render/toast pipeline,
+ * so a wrong guess never surfaces its own "Error rendering template" toast.
+ * @returns {Promise<string>} the extension name to pass to renderExtensionTemplateAsync
+ */
+async function resolveExtensionTemplateName() {
+    if (cachedExtensionTemplateName) return cachedExtensionTemplateName;
+    for (const name of WEYPHONE_EXTENSION_NAME_CANDIDATES) {
+        try {
+            const response = await fetch(`/scripts/extensions/${name}/settings.html`, { method: 'HEAD' });
+            if (response.ok) {
+                cachedExtensionTemplateName = name;
+                return name;
+            }
+        } catch {
+            // Network error probing this candidate — fall through and try the next one.
+        }
+    }
+    return WEYPHONE_EXTENSION_NAME_CANDIDATES[0];
+}
+
 /**
  * Fetches WeyPhone's settings.html via SillyTavern's renderExtensionTemplateAsync, retrying a
  * few times on failure before giving up. This call fires the moment WeyPhone's script runs on
@@ -2335,8 +2372,9 @@ function initPanel() {
  * @returns {Promise<string | undefined>}
  */
 async function fetchSettingsTemplateWithRetry(context, attempts = 3, delayMs = 500) {
+    const templateName = await resolveExtensionTemplateName();
     for (let attempt = 1; attempt <= attempts; attempt++) {
-        const template = await context.renderExtensionTemplateAsync('third-party/Weyland-WeyPhone', 'settings');
+        const template = await context.renderExtensionTemplateAsync(templateName, 'settings');
         if (template) return template;
         if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
