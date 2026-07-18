@@ -2334,6 +2334,12 @@ async function initExtensionSettingsPanel() {
     const context = SillyTavern.getContext();
     const settings = getSettings(context.extensionSettings);
     const template = await context.renderExtensionTemplateAsync('third-party/Weyland-WeyPhone', 'settings');
+    // renderExtensionTemplateAsync (SillyTavern core) swallows its own fetch/compile errors and
+    // resolves `undefined` instead of throwing (see public/scripts/templates.js) — ST already
+    // toasts that failure itself, so this just has to not compound it. Without this guard,
+    // insertAdjacentHTML coerces `undefined` to the literal string "undefined", dumping that text
+    // where the whole drawer (title, expansion arrow, every control) should be.
+    if (!template) return;
     const container = document.getElementById('extensions_settings2');
     if (!container) return;
     container.insertAdjacentHTML('beforeend', template);
