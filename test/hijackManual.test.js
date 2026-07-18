@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { findMostRecentAssistantMessage } from '../lib/hijackManual.js';
 import { undoCapture } from '../lib/hijackManual.js';
+import { scopeMatchesThreadParticipants } from '../lib/hijackManual.js';
 
 test('findMostRecentAssistantMessage returns null for an empty chat', () => {
     assert.equal(findMostRecentAssistantMessage([]), null);
@@ -129,4 +130,42 @@ test('undoCapture is a no-op on the chat when messageId is null (nothing to rest
     const chat = [{ mes: 'unaffected' }];
     undoCapture(settings, snapshot, chat);
     assert.equal(chat[0].mes, 'unaffected');
+});
+
+test('scopeMatchesThreadParticipants: a headered scope matches only when its resolved participant set exactly equals the thread\'s own (order-independent)', () => {
+    const scope = { owner: 'Rosa', title: null, lines: [], lineIndices: [] };
+    const decision = { captured: true, perspective: 'CHAR', ownerEntryName: 'Rosa' };
+    assert.equal(scopeMatchesThreadParticipants(scope, decision, ['Rosa'], ['Rosa'], false), true);
+    assert.equal(scopeMatchesThreadParticipants(scope, decision, ['Rosa', 'Belle'], ['Rosa'], false), false);
+    assert.equal(scopeMatchesThreadParticipants(scope, decision, ['Belle'], ['Belle'], false), false);
+});
+
+test('scopeMatchesThreadParticipants: order-independence for a group thread', () => {
+    const scope = { owner: 'Belle', title: 'Rosa & Belle', lines: [], lineIndices: [] };
+    const decision = { captured: true, perspective: 'CHAR', ownerEntryName: 'Belle' };
+    assert.equal(scopeMatchesThreadParticipants(scope, decision, ['Belle', 'Rosa'], ['Rosa', 'Belle'], false), true);
+});
+
+test('scopeMatchesThreadParticipants: a headerless (owner:null) scope is rejected by default, even with a plausible participant set, unless parseUnscoped is true', () => {
+    const scope = { owner: null, title: null, lines: [], lineIndices: [] };
+    const decision = { captured: true, perspective: 'CHAR', ownerEntryName: 'Rosa' };
+    assert.equal(scopeMatchesThreadParticipants(scope, decision, ['Rosa'], ['Rosa'], false), false);
+});
+
+test('scopeMatchesThreadParticipants: with parseUnscoped=true, a headerless scope is eligible for a thread as long as its resolved owner is inside that thread\'s participant set', () => {
+    const scope = { owner: null, title: null, lines: [], lineIndices: [] };
+    const decision = { captured: true, perspective: 'CHAR', ownerEntryName: 'Rosa' };
+    assert.equal(scopeMatchesThreadParticipants(scope, decision, ['Rosa'], ['Rosa'], true), true);
+});
+
+test('scopeMatchesThreadParticipants: with parseUnscoped=true, a headerless scope is still rejected if its resolved owner is a DIFFERENT character not in the thread', () => {
+    const scope = { owner: null, title: null, lines: [], lineIndices: [] };
+    const decision = { captured: true, perspective: 'CHAR', ownerEntryName: 'Belle' };
+    assert.equal(scopeMatchesThreadParticipants(scope, decision, ['Rosa'], ['Rosa'], true), false);
+});
+
+test('scopeMatchesThreadParticipants: a USER-perspective scope (no CHAR owner) never matches any thread — nothing character-owned to attribute it to', () => {
+    const scope = { owner: null, title: null, lines: [], lineIndices: [] };
+    const decision = { captured: true, perspective: 'USER', ownerEntryName: null };
+    assert.equal(scopeMatchesThreadParticipants(scope, decision, ['Rosa'], ['Rosa'], true), false);
 });
