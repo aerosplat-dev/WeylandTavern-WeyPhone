@@ -2264,6 +2264,12 @@ function initPanel() {
     const context = SillyTavern.getContext();
     context.eventSource.on(context.eventTypes.CHAT_CHANGED, updateTetheredToggleAvailability);
     context.eventSource.on(context.eventTypes.CHAT_CHANGED, refreshHomeScreenAvailability);
+    // Tethered-thread visibility is scoped to the active roleplay chat, so switching chats changes
+    // which threads/unread counts are visible. refreshHomeScreenAvailability covers the home view;
+    // these two cover the Messages/Threads lists and the (panel-closed-visible) unread badges, which
+    // otherwise stay stale — showing a thread tethered elsewhere — until the next manual navigation.
+    context.eventSource.on(context.eventTypes.CHAT_CHANGED, refreshVisibleScreen);
+    context.eventSource.on(context.eventTypes.CHAT_CHANGED, refreshUnreadBadges);
     context.eventSource.on(context.eventTypes.MESSAGE_RECEIVED, weyPhoneHijackHandler);
 
     // Closes the Regenerate popup menu on any click outside it — the menu's own toggle/item
