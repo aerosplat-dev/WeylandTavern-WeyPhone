@@ -8,7 +8,7 @@ import { createPanelMarkup, renderMessagesScreen, renderContactsScreen, renderCo
 import { formatRelativeTime, formatClockTime } from './lib/formatTime.js';
 import { withTypingState } from './lib/generationTracking.js';
 import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
-import { formatParticipantNames } from './lib/participants.js';
+import { formatParticipantNames, resolveThreadDisplayName } from './lib/participants.js';
 import { parseReply, parseGroupReply } from './lib/messageParsing.js';
 import { locatePhoneScopes, stripPhoneScopes } from './lib/hijackParsing.js';
 import { shouldProcessHijackMessage, evaluateScope, planScopeCapture, dedupeRecap } from './lib/hijackRouting.js';
@@ -1587,6 +1587,18 @@ function handleScreenBodyClick(event) {
         renderImportScenarioOverlay();
         return;
     }
+    const renameThreadMenuItem = event.target.closest('.wp-popup-menu-item[data-action="rename-thread"]');
+    if (renameThreadMenuItem) {
+        closeRegenerateMenu();
+        renderThreadNameOverlay('displayName');
+        return;
+    }
+    const setNicknameMenuItem = event.target.closest('.wp-popup-menu-item[data-action="set-nickname"]');
+    if (setNicknameMenuItem) {
+        closeRegenerateMenu();
+        renderThreadNameOverlay('userNickname');
+        return;
+    }
     const memoryAddBtn = event.target.closest('#wp-memory-add-button');
     if (memoryAddBtn) {
         handleAddMemory();
@@ -1873,7 +1885,7 @@ function showScreen(view) {
         showScreen('messages');
         return;
     }
-    title.textContent = formatParticipantNames(conversation.participants);
+    title.textContent = resolveThreadDisplayName(conversation);
     const portraitMap = buildPortraitMap(context.characters, conversation.participants, context.getThumbnailUrl, castRosterPortraitSlugs);
     const conversationPortraits = conversation.participants.map(name => portraitMap[name]);
     renderPanelAvatar(document.getElementById('wp-panel-avatar'), conversation.participants.length > 1 ? conversationPortraits : conversationPortraits[0]);
@@ -2734,6 +2746,74 @@ function renderImportScenarioOverlay() {
 
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     ensurePortal().appendChild(overlay);
+}
+
+/**
+ * Single-field text-input overlay for the two per-thread naming actions. Mounted inside #wp-portal
+ * (same containing-block reasoning as renderImportScenarioOverlay — a bare position:fixed element
+ * under <body> breaks on mobile since ST puts a non-`none` transform on <html>). Prefilled with the
+ * thread's current value; Save commits a trimmed string, or explicit null when blank (Resolved
+ * Ambiguity 3 — keeps displayName's sticky auto-fill guard clean). Available on any thread, tethered
+ * or not; an untethered thread's names are cosmetic until it is later tethered.
+ * @param {'displayName' | 'userNickname'} field which Conversation field this edits
+ */
+function renderThreadNameOverlay(field) {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, currentConversationId);
+    if (!conversation) return;
+    document.getElementById('wp-thread-name-overlay')?.remove();
+
+    const isDisplayName = field === 'displayName';
+    const overlay = document.createElement('div');
+    overlay.id = 'wp-thread-name-overlay';
+    const frame = document.createElement('div');
+    frame.className = 'wp-nick-frame';
+    overlay.appendChild(frame);
+
+    const title = document.createElement('h3');
+    title.textContent = isDisplayName ? 'Rename Thread' : 'Set Nickname';
+    frame.appendChild(title);
+
+    const label = document.createElement('p');
+    label.textContent = isDisplayName
+        ? 'A custom name for this thread (leave blank to use the participant names).'
+        : "What this thread's characters call you (leave blank to clear).";
+    frame.appendChild(label);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'text_pole';
+    input.value = conversation[field] || '';
+    input.placeholder = isDisplayName ? formatParticipantNames(conversation.participants) : 'optional';
+    frame.appendChild(input);
+
+    const actions = document.createElement('div');
+    actions.className = 'wp-nick-actions';
+    const cancelBtn = document.createElement('input');
+    cancelBtn.className = 'menu_button';
+    cancelBtn.type = 'button';
+    cancelBtn.value = 'Cancel';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+    const saveBtn = document.createElement('input');
+    saveBtn.className = 'menu_button';
+    saveBtn.type = 'button';
+    saveBtn.value = 'Save';
+    const commit = () => {
+        const trimmed = input.value.trim();
+        setConversationNames(settings, conversation.id, { [field]: trimmed || null });
+        context.saveSettingsDebounced();
+        overlay.remove();
+        refreshVisibleScreen();
+    };
+    saveBtn.addEventListener('click', commit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
+    actions.append(cancelBtn, saveBtn);
+    frame.appendChild(actions);
+
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    ensurePortal().appendChild(overlay);
+    input.focus();
 }
 
 /**
