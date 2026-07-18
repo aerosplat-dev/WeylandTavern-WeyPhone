@@ -2631,7 +2631,32 @@ function handleImportFromScenario({ wipeFirst, parseUnscoped }) {
                 throw innerError;
             }
         } else {
-            const importedMessages = scanAndCollect();
+            // Append-only (No). planScopeCapture internally recap-dedups each scope against
+            // findMostRecentThread(participants) -- correct for LIVE hijack (drop the model's recap
+            // of prior messages), but wrong here: it removes only whichever scope matches THIS
+            // thread's current TAIL, leaving any earlier-in-history scope that isn't at the tail to
+            // slip past the single outer (prefix-only) dedupeRecap below and get re-appended. That
+            // makes repeat Import->No non-idempotent -- a second No-run re-appends the off-tail
+            // block, a third re-appends the other, etc. (verified live) -- violating this function's
+            // own "already-known content is never duplicated" contract. Fix mirrors the Yes-path:
+            // temporarily wipe every same-participant thread so the scan sees them empty and
+            // planScopeCapture returns the FULL transposed history for every scope, making the outer
+            // dedupeRecap against this thread's REAL stored content the single arbiter of what's new.
+            // Unlike Yes, ALL threads (target included) are restored to their real content in the
+            // finally -- No never rebuilds the target, it only appends -- and the target's
+            // lastMemoryMessageIndex is deliberately left untouched (appended content extends the
+            // existing thread; prior summaries stay valid). Synchronous scan over extensionSettings,
+            // not the live ST chat array, so there is no autosave/reentrancy risk from the wipe.
+            const siblingThreads = Object.values(settings.conversations)
+                .filter(c => sameParticipants(c.participants, conversation.participants));
+            const snapshots = siblingThreads.map(c => ({ conv: c, messages: c.messages }));
+            let importedMessages;
+            try {
+                for (const c of siblingThreads) c.messages = [];
+                importedMessages = scanAndCollect();
+            } finally {
+                for (const snap of snapshots) snap.conv.messages = snap.messages;
+            }
             const remainder = dedupeRecap(importedMessages, conversation.messages);
             for (const msg of remainder) appendMessage(settings, conversation.id, msg);
         }
