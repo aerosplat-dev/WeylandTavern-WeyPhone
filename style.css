@@ -1462,3 +1462,41 @@
     gap: 8px;
     margin-top: 16px;
 }
+
+/* Import-from-Scenario confirm overlay — same floating-frame pattern as Configure-Nicknames
+   above (lives OUTSIDE #wp-portal, its own stacking context); reuses the .wp-nick-frame/
+   .wp-nick-actions classes verbatim, so it only needs its own id-scoped copy of the base rules —
+   a new overlay id does not inherit another overlay's id-scoped CSS. */
+#wp-import-scenario-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+}
+#wp-import-scenario-overlay .wp-nick-frame {
+    width: min(420px, 92vw);
+    max-height: 88vh;
+    overflow-y: auto;
+    background: var(--SmartThemeBlurTintColor, #1b1b1f);
+    color: var(--SmartThemeBodyColor, #e6e6e6);
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+#wp-import-scenario-overlay h3 { margin: 0 0 12px; }
+#wp-import-scenario-overlay p { margin: 0 0 12px; }
+#wp-import-scenario-overlay .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+#wp-import-scenario-overlay .wp-nick-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}

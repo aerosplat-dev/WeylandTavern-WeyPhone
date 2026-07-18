@@ -11,8 +11,8 @@ import { buildPortraitMap, buildPsaPortraitMap } from './lib/portraits.js';
 import { formatParticipantNames } from './lib/participants.js';
 import { parseReply, parseGroupReply } from './lib/messageParsing.js';
 import { locatePhoneScopes, stripPhoneScopes } from './lib/hijackParsing.js';
-import { shouldProcessHijackMessage, evaluateScope, planScopeCapture } from './lib/hijackRouting.js';
-import { findMostRecentAssistantMessage, undoCapture } from './lib/hijackManual.js';
+import { shouldProcessHijackMessage, evaluateScope, planScopeCapture, dedupeRecap } from './lib/hijackRouting.js';
+import { findMostRecentAssistantMessage, undoCapture, scopeMatchesThreadParticipants } from './lib/hijackManual.js';
 import { TEXTING_MODE_INSTRUCTIONS } from './lib/textingModeInstructions.js';
 import { buildMemoryGenerationMessages, joinMemoriesForInjection, sendMemoryRequest } from './lib/memoryGeneration.js';
 import { isMainRoleplayActive, resolveMainActiveLtmEntries, resolveMainHistorySlice, formatMainHistoryTranscript, buildTetheredViewBlock, convertMainChatToMessages, buildScanHistoryWithExtraText } from './lib/tetheredContext.js';
@@ -363,6 +363,8 @@ async function resolveWorldInfoTetheredForMainChat(context, extraScanText) {
 function updateRegenerateEnabled(conversation) {
     const menu = document.getElementById('wp-regenerate-menu');
     if (!menu) return;
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
     const isGenerating = generatingConversationIds.has(currentConversationId);
     const messages = conversation.messages;
     // A conversation ending on an unanswered user message (e.g. the last generation attempt
@@ -374,7 +376,7 @@ function updateRegenerateEnabled(conversation) {
     while (cutIndex > 0 && messages[cutIndex - 1].role === 'assistant') cutIndex--;
     const hasTrailingReplyToDiscard = cutIndex > 0 && cutIndex < messages.length;
     const hasRegeneratable = endsOnPendingUserMessage || hasTrailingReplyToDiscard;
-    setRegenerateMenuItemsEnabled(menu, { canRegenerate: hasRegeneratable && !isGenerating, hasMessages: messages.length > 0 });
+    setRegenerateMenuItemsEnabled(menu, { canRegenerate: hasRegeneratable && !isGenerating, hasMessages: messages.length > 0, canImportScenario: settings.bidirectionalTetheringEnabled });
 }
 
 function getSelectState() {
@@ -1545,6 +1547,12 @@ function handleScreenBodyClick(event) {
         handleSwitchThreads();
         return;
     }
+    const importScenarioMenuItem = event.target.closest('.wp-popup-menu-item[data-action="import-scenario"]:not(:disabled)');
+    if (importScenarioMenuItem) {
+        closeRegenerateMenu();
+        renderImportScenarioOverlay();
+        return;
+    }
     const memoryAddBtn = event.target.closest('#wp-memory-add-button');
     if (memoryAddBtn) {
         handleAddMemory();
@@ -2456,6 +2464,132 @@ function renderNicknameConfigFrame() {
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     document.body.appendChild(overlay);
     chipInput.focus();
+}
+
+/**
+ * Builds and shows the Import-from-Scenario confirm overlay OUTSIDE #wp-portal, modeled on
+ * renderNicknameConfigFrame's own hand-rolled overlay pattern above (no ST Popup/callGenericPopup
+ * exists anywhere in this extension, so this follows the same house convention rather than
+ * introducing a new dependency). "Delete the current thread?" with Yes/No, plus an
+ * unchecked-by-default "Parse unscoped messages" checkbox. Read-only against the roleplay: the
+ * scan below never mutates context.chat or any message's .mes.
+ */
+function renderImportScenarioOverlay() {
+    const context = SillyTavern.getContext();
+    const settings = getSettings(context.extensionSettings);
+    const conversation = getConversation(settings, currentConversationId);
+    if (!conversation) return;
+    document.getElementById('wp-import-scenario-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'wp-import-scenario-overlay';
+    const frame = document.createElement('div');
+    frame.className = 'wp-nick-frame';
+    overlay.appendChild(frame);
+
+    const title = document.createElement('h3');
+    title.textContent = 'Import from Scenario';
+    frame.appendChild(title);
+
+    const question = document.createElement('p');
+    question.textContent = 'Delete the current thread?';
+    frame.appendChild(question);
+
+    const checkboxLabel = document.createElement('label');
+    checkboxLabel.className = 'checkbox_label';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'wp-import-parse-unscoped-checkbox';
+    checkboxLabel.append(checkbox, document.createTextNode(' Parse unscoped messages'));
+    frame.appendChild(checkboxLabel);
+
+    const actions = document.createElement('div');
+    actions.className = 'wp-nick-actions';
+    const noBtn = document.createElement('input');
+    noBtn.className = 'menu_button';
+    noBtn.type = 'button';
+    noBtn.value = 'No';
+    noBtn.addEventListener('click', () => {
+        handleImportFromScenario({ wipeFirst: false, parseUnscoped: checkbox.checked });
+        overlay.remove();
+    });
+    const yesBtn = document.createElement('input');
+    yesBtn.className = 'menu_button';
+    yesBtn.type = 'button';
+    yesBtn.value = 'Yes';
+    yesBtn.addEventListener('click', () => {
+        handleImportFromScenario({ wipeFirst: true, parseUnscoped: checkbox.checked });
+        overlay.remove();
+    });
+    actions.append(noBtn, yesBtn);
+    frame.appendChild(actions);
+
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+}
+
+/**
+ * Runs the multi-scope engine across EVERY assistant-authored message in the active roleplay's
+ * ENTIRE chat history (read-only — never strips/edits any source message, unlike live Hijack and
+ * manual Capture), restricted via scopeMatchesThreadParticipants to scopes belonging to the
+ * CURRENT thread's own participant set. wipeFirst=true (Yes) clears the thread's messages first
+ * and rebuilds from every matching scope in chronological order; wipeFirst=false (No) keeps
+ * existing messages and appends only genuinely new matches via the base engine's recap-dedup
+ * (dedupeRecap), diffed against the thread's own stored tail so already-known content is never
+ * duplicated.
+ * @param {{wipeFirst: boolean, parseUnscoped: boolean}} options
+ */
+function handleImportFromScenario({ wipeFirst, parseUnscoped }) {
+    try {
+        const context = SillyTavern.getContext();
+        const settings = getSettings(context.extensionSettings);
+        const conversation = getConversation(settings, currentConversationId);
+        if (!conversation) return;
+
+        const ctx = {
+            userName: context.name1 || 'User',
+            userNicknames: settings.userNicknames,
+            castRoster: castRosterEntries,
+            characterNicknames: settings.characterNicknames,
+        };
+
+        const chat = context.chat ?? [];
+        const importedMessages = [];
+        for (const message of chat) {
+            if (!shouldProcessHijackMessage(message)) continue;
+            const scopes = locatePhoneScopes(message.mes);
+            for (const scope of scopes) {
+                const decision = evaluateScope(scope, ctx);
+                if (!decision.captured) continue;
+                const plan = planScopeCapture(scope, decision, ctx, settings);
+                if (!plan.captured) continue;
+                if (!scopeMatchesThreadParticipants(scope, decision, conversation.participants, plan.participants, parseUnscoped)) continue;
+                for (const msg of plan.messages) {
+                    importedMessages.push({
+                        role: msg.role,
+                        content: msg.content,
+                        ...(msg.speaker ? { speaker: msg.speaker } : {}),
+                        timestamp: genTimestamp(),
+                    });
+                }
+            }
+        }
+
+        if (wipeFirst) {
+            conversation.messages = [];
+            for (const msg of importedMessages) appendMessage(settings, conversation.id, msg);
+        } else {
+            const remainder = dedupeRecap(importedMessages, conversation.messages);
+            for (const msg of remainder) appendMessage(settings, conversation.id, msg);
+        }
+
+        context.saveSettingsDebounced();
+        refreshVisibleScreen();
+        toastr.success('Import from Scenario complete.', 'WeyPhone');
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Import from Scenario failed:`, error);
+        toastr.error(error.message, 'WeyPhone');
+    }
 }
 
 /**
