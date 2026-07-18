@@ -2760,9 +2760,8 @@ function handleImportFromScenario({ wipeFirst, parseUnscoped }) {
 
         const ctx = {
             userName: context.name1 || 'User',
-            userNicknames: settings.userNicknames,
             castRoster: castRosterEntries,
-            characterNicknames: settings.characterNicknames,
+            roleplayChatId: context.chatId ?? null,
         };
 
         const chat = context.chat ?? [];
@@ -2773,7 +2772,7 @@ function handleImportFromScenario({ wipeFirst, parseUnscoped }) {
                 if (!shouldProcessHijackMessage(message)) continue;
                 const scopes = locatePhoneScopes(message.mes);
                 for (const scope of scopes) {
-                    const decision = evaluateScope(scope, ctx);
+                    const decision = evaluateScope(scope, ctx, settings);
                     if (!decision.captured) continue;
                     const plan = planScopeCapture(scope, decision, ctx, settings);
                     if (!plan.captured) continue;
@@ -2961,9 +2960,7 @@ function runHijackCaptureForMessage(context, settings, messageId) {
 
     const ctx = {
         userName: context.name1 || 'User',
-        userNicknames: settings.userNicknames,
         castRoster: castRosterEntries,
-        characterNicknames: settings.characterNicknames,
         roleplayChatId: context.chatId ?? null,
     };
 
@@ -2974,7 +2971,7 @@ function runHijackCaptureForMessage(context, settings, messageId) {
     const capturedScopes = [];
     const toastParticipantSets = [];
     for (const scope of scopes) {
-        const decision = evaluateScope(scope, ctx);
+        const decision = evaluateScope(scope, ctx, settings);
         if (!decision.captured) continue;
         const plan = planScopeCapture(scope, decision, ctx, settings);
         if (!plan.captured) continue;

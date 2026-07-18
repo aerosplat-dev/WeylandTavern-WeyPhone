@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveHijackSpeaker, resolveUserReference, evaluateScope, dedupeRecap, planScopeCapture, shouldProcessHijackMessage, BUILT_IN_USER_NICKNAMES_BY_CHARACTER } from '../lib/hijackRouting.js';
+import { resolveHijackSpeaker, resolveUserReference, evaluateScope, dedupeRecap, planScopeCapture, shouldProcessHijackMessage, BUILT_IN_USER_NICKNAMES_BY_CHARACTER, buildUserAliasSet } from '../lib/hijackRouting.js';
 import { ROSTER } from './helpers.js';
 
 test('resolveHijackSpeaker matches a bare entryName case-insensitively (canonical casing returned)', () => {
@@ -17,11 +17,6 @@ test('resolveHijackSpeaker matches when the known name is a SUBSTRING of a decor
 test('resolveHijackSpeaker matches a fullName token (first or last name)', () => {
     assert.equal(resolveHijackSpeaker('Vermillion', ROSTER), 'Rosa'); // Rosa Vermillion
     assert.equal(resolveHijackSpeaker('Cadence', ROSTER), 'Belle');   // Belle Cadence
-});
-
-test('resolveHijackSpeaker matches a per-character custom nickname when supplied', () => {
-    assert.equal(resolveHijackSpeaker('wolfy', ROSTER, { Blake: 'wolfy' }), 'Blake');
-    assert.equal(resolveHijackSpeaker('lil wolfy here', ROSTER, { Blake: 'wolfy' }), 'Blake');
 });
 
 test('resolveHijackSpeaker returns null for an unrecognized or empty name', () => {
@@ -50,77 +45,73 @@ test('shouldProcessHijackMessage rejects user, system, missing, and no-text mess
     assert.equal(shouldProcessHijackMessage({ mes: 42 }), false);
 });
 
-const CTX = { userName: 'Tim', userNicknames: ['juicebox'], castRoster: ROSTER, characterNicknames: {}, roleplayChatId: 'chat-1' };
+const CTX = { userName: 'Tim', castRoster: ROSTER, roleplayChatId: 'chat-1' };
+const SETTINGS = { conversations: {} };
 const scope = (owner, title, lines) => ({ owner, title, lines, lineIndices: [] });
 const inc = (sender, text) => ({ direction: 'Incoming', sender, text });
 const out = (sender, text) => ({ direction: 'Outgoing', sender, text });
 
 test('evaluateScope: owner set, matches {{user}} -> PERSPECTIVE USER', () => {
     const s = scope('Tim', null, [inc('Rosa', 'hey'), out('Tim', 'hi')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
-});
-
-test('evaluateScope: owner set, matches a user NICKNAME -> PERSPECTIVE USER', () => {
-    const s = scope('juicebox', null, [inc('Rosa', 'hey')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: true, perspective: 'USER', ownerEntryName: null });
 });
 
 test('evaluateScope: owner set, matches the roster -> PERSPECTIVE CHAR with ownerEntryName', () => {
     // Blake's phone; Tim (user) texts in -> participation TRUE via Incoming sender.
     const s = scope('Blake', null, [inc('Tim', 'you up?'), out('Blake', 'yeah')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'CHAR', ownerEntryName: 'Blake' });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: true, perspective: 'CHAR', ownerEntryName: 'Blake' });
 });
 
 test('evaluateScope: owner set, matches neither {{user}} nor roster -> dropped', () => {
     const s = scope('Stranger', null, [inc('Rosa', 'hey')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: false });
 });
 
 test('evaluateScope: owner unset, no Outgoing, {{user}} NOT an Incoming sender -> USER (today default)', () => {
     const s = scope(null, null, [inc('Rosa', 'hey'), inc('Rosa', 'you there?')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: true, perspective: 'USER', ownerEntryName: null });
 });
 
 test('evaluateScope: FLAGGED EDGE — owner unset, no Outgoing, {{user}} IS an Incoming sender -> dropped', () => {
     const s = scope(null, null, [inc('Tim', 'weird self-text')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: false });
 });
 
 test('evaluateScope: owner unset, Outgoing first-sender is {{user}} -> USER', () => {
     const s = scope(null, null, [out('Tim', 'yo'), inc('Rosa', 'hey')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: true, perspective: 'USER', ownerEntryName: null });
 });
 
 test('evaluateScope: owner unset, Outgoing first-sender is a roster char, {{user}} in Incoming -> CHAR', () => {
     const s = scope(null, null, [out('Blake', 'hey'), inc('Tim', 'sup')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'CHAR', ownerEntryName: 'Blake' });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: true, perspective: 'CHAR', ownerEntryName: 'Blake' });
 });
 
 test('evaluateScope: owner unset, Outgoing first-sender matches neither -> dropped', () => {
     const s = scope(null, null, [out('Stranger', 'hey')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: false });
 });
 
 test('evaluateScope: CHAR participation via TITLE partial-matching {{user}}', () => {
     // Blake's phone, title names the user; no {{user}} Incoming sender needed.
     const s = scope('Blake', 'Tim', [inc('Rosa', 'group msg'), out('Blake', 'reply')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'CHAR', ownerEntryName: 'Blake' });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: true, perspective: 'CHAR', ownerEntryName: 'Blake' });
 });
 
 test('evaluateScope: FLAGGED EDGE — fully-indeterminate CHAR, no title, {{user}} absent -> dropped (participation FALSE)', () => {
     const s = scope(null, null, [out('Blake', 'hey'), inc('Rosa', 'hi')]); // CHAR from Outgoing, no title, no user
-    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: false });
 });
 
 test('evaluateScope: compatibility aborts the WHOLE scope on one unresolved non-user sender', () => {
     // USER perspective, participation always TRUE, but "Ghost" resolves to no roster entry.
     const s = scope('Tim', null, [inc('Rosa', 'hey'), inc('Ghost', 'boo')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: false });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: false });
 });
 
 test('evaluateScope: compatibility tolerates a decorated sender ("Blake 🐺") in a USER scope', () => {
     const s = scope('Tim', null, [inc('Blake 🐺', 'hey')]);
-    assert.deepEqual(evaluateScope(s, CTX), { captured: true, perspective: 'USER', ownerEntryName: null });
+    assert.deepEqual(evaluateScope(s, CTX, SETTINGS), { captured: true, perspective: 'USER', ownerEntryName: null });
 });
 
 // Decisions produced by evaluateScope, hand-built here so planScopeCapture is tested in isolation.
@@ -287,4 +278,104 @@ test('BUILT_IN_USER_NICKNAMES_BY_CHARACTER is exactly the three spec entries', (
         Belle: 'wolfmeat',
         Indigo: 'pookie',
     });
+});
+
+// A roster including the hardcoded built-in characters (Summer/Indigo are not in the shared ROSTER).
+const NICK_ROSTER = [
+    { entryName: 'Summer', fullName: 'Summer Vale', hasFullBot: true, hasSubbot: true },
+    { entryName: 'Belle', fullName: 'Belle Cadence', hasFullBot: true, hasSubbot: true },
+    { entryName: 'Indigo', fullName: 'Indigo Sky', hasFullBot: true, hasSubbot: true },
+    { entryName: 'Blake', fullName: 'Blake Wolfe', hasFullBot: true, hasSubbot: true },
+];
+const nickCtx = { userName: 'Tim', castRoster: NICK_ROSTER, roleplayChatId: 'chat-1' };
+// A tethered thread fixture for these participants, scoped to chat-1.
+const tetheredThread = (participants, extra) => ({
+    conversations: { t: { id: 't', participants, messages: [], lastActive: 1, tethered: true, roleplayChatId: 'chat-1', ...extra } },
+});
+
+test('buildUserAliasSet: hardcoded character with no thread yields the built-in only', () => {
+    const s = scope('Summer', null, [out('Summer', 'hi')]);
+    const { aliases, tethered } = buildUserAliasSet(s, 'Summer', NICK_ROSTER, { conversations: {} }, 'chat-1');
+    assert.deepEqual(aliases, ['juicebox']);
+    assert.equal(tethered, undefined);
+});
+
+test('buildUserAliasSet: non-hardcoded character with no thread yields no aliases', () => {
+    const s = scope('Blake', null, [out('Blake', 'hi')]);
+    const { aliases } = buildUserAliasSet(s, 'Blake', NICK_ROSTER, { conversations: {} }, 'chat-1');
+    assert.deepEqual(aliases, []);
+});
+
+test('buildUserAliasSet: hardcoded character WITH a custom userNickname yields both', () => {
+    const s = scope('Summer', null, [out('Summer', 'hi')]);
+    const settings = tetheredThread(['Summer'], { userNickname: 'sweetpea' });
+    const { aliases, tethered } = buildUserAliasSet(s, 'Summer', NICK_ROSTER, settings, 'chat-1');
+    assert.deepEqual(aliases, ['juicebox', 'sweetpea']);
+    assert.equal(tethered.id, 't');
+});
+
+test('buildUserAliasSet: non-hardcoded character WITH a custom userNickname yields just the nickname', () => {
+    const s = scope('Blake', null, [out('Blake', 'hi')]);
+    const settings = tetheredThread(['Blake'], { userNickname: 'wolfy' });
+    const { aliases } = buildUserAliasSet(s, 'Blake', NICK_ROSTER, settings, 'chat-1');
+    assert.deepEqual(aliases, ['wolfy']);
+});
+
+test('buildUserAliasSet: a thread tethered to a DIFFERENT roleplay is not consulted', () => {
+    const s = scope('Summer', null, [out('Summer', 'hi')]);
+    const settings = { conversations: { t: { id: 't', participants: ['Summer'], messages: [], lastActive: 1, tethered: true, roleplayChatId: 'chat-OTHER', userNickname: 'sweetpea' } } };
+    const { aliases } = buildUserAliasSet(s, 'Summer', NICK_ROSTER, settings, 'chat-1');
+    assert.deepEqual(aliases, ['juicebox']); // built-in only; the other roleplay's nickname is invisible
+});
+
+test('evaluateScope: baseline — non-hardcoded CHAR, no thread, a would-be nickname sender is NOT recognized', () => {
+    // Blake owns the phone; the only other sender is "juicebox" — but Blake has no built-in and no
+    // thread, so "juicebox" is neither {{user}} nor a roster character -> compatibility drops it.
+    const s = scope('Blake', null, [inc('juicebox', 'hey'), out('Blake', 'yo')]);
+    assert.deepEqual(evaluateScope(s, nickCtx, { conversations: {} }), { captured: false });
+});
+
+test('evaluateScope: hardcoded built-in alone satisfies participation + compatibility (no custom nickname)', () => {
+    // Summer's phone; {{user}} texts in as "juicebox" (the built-in). No thread, no custom nickname.
+    const s = scope('Summer', null, [inc('juicebox', 'you up?'), out('Summer', 'yeah')]);
+    assert.deepEqual(evaluateScope(s, nickCtx, { conversations: {} }),
+        { captured: true, perspective: 'CHAR', ownerEntryName: 'Summer' });
+});
+
+test('evaluateScope: custom userNickname AND built-in both work simultaneously', () => {
+    const settings = tetheredThread(['Summer'], { userNickname: 'sweetpea' });
+    const viaBuiltin = scope('Summer', null, [inc('juicebox', 'hi'), out('Summer', 'hey')]);
+    const viaCustom = scope('Summer', null, [inc('sweetpea', 'hi'), out('Summer', 'hey')]);
+    assert.equal(evaluateScope(viaBuiltin, nickCtx, settings).captured, true);
+    assert.equal(evaluateScope(viaCustom, nickCtx, settings).captured, true);
+});
+
+test('evaluateScope: title matching an established displayName satisfies group participation', () => {
+    // Wolf Pack = Summer + Belle, already tethered with displayName. A returning scene whose title is
+    // "Wolf Pack 🐺" (no {{user}} sender, no {{user}} in a recognizable form) participates via the
+    // displayName match.
+    const settings = tetheredThread(['Summer', 'Belle'], { displayName: 'Wolf Pack' });
+    const s = scope('Summer', 'Wolf Pack 🐺', [inc('Belle', 'we going?'), out('Summer', 'yes')]);
+    assert.deepEqual(evaluateScope(s, nickCtx, settings),
+        { captured: true, perspective: 'CHAR', ownerEntryName: 'Summer' });
+});
+
+test('evaluateScope: without an established displayName the same returning scene drops', () => {
+    const s = scope('Summer', 'Wolf Pack 🐺', [inc('Belle', 'we going?'), out('Summer', 'yes')]);
+    assert.deepEqual(evaluateScope(s, nickCtx, { conversations: {} }), { captured: false });
+});
+
+test('planScopeCapture.classify uses the SAME additive alias set (a built-in sender becomes user, not assistant)', () => {
+    // Summer group scope: "juicebox" (built-in {{user}}) + Belle + Summer(owner). The juicebox line
+    // must classify as role:'user', proving classify() consults the same builder as evaluateScope.
+    const s = scope('Summer', null, [inc('juicebox', 'in'), inc('Belle', 'party?'), out('Summer', 'yeah')]);
+    const decision = { captured: true, perspective: 'CHAR', ownerEntryName: 'Summer' };
+    const plan = planScopeCapture(s, decision, nickCtx, { conversations: {} });
+    assert.deepEqual(plan.participants, ['Belle', 'Summer']);
+    assert.deepEqual(plan.messages, [
+        { role: 'user', content: 'in' },
+        { role: 'assistant', content: 'party?', speaker: 'Belle' },
+        { role: 'assistant', content: 'yeah', speaker: 'Summer' },
+    ]);
+    assert.equal(plan.unreadIncrement, 2);
 });
