@@ -55,7 +55,7 @@ test('shouldProcessHijackMessage rejects user, system, missing, and no-text mess
     assert.equal(shouldProcessHijackMessage({ mes: 42 }), false);
 });
 
-const CTX = { userName: 'Tim', userNicknames: ['juicebox'], castRoster: ROSTER, characterNicknames: {} };
+const CTX = { userName: 'Tim', userNicknames: ['juicebox'], castRoster: ROSTER, characterNicknames: {}, roleplayChatId: 'chat-1' };
 const scope = (owner, title, lines) => ({ owner, title, lines, lineIndices: [] });
 const inc = (sender, text) => ({ direction: 'Incoming', sender, text });
 const out = (sender, text) => ({ direction: 'Outgoing', sender, text });
@@ -157,7 +157,7 @@ test('dedupeRecap: matches only a PREFIX (a later coincidental match is not drop
 });
 
 test('planScopeCapture: USER solo scope, existing thread appends there, no speaker', () => {
-    const settings = { conversations: { c1: { id: 'c1', participants: ['Rosa'], messages: [], lastActive: 5 } } };
+    const settings = { conversations: { c1: { id: 'c1', participants: ['Rosa'], messages: [], lastActive: 5, tethered: true, roleplayChatId: 'chat-1' } } };
     const s = scope('Tim', null, [inc('Rosa', 'hey'), out('Tim', 'on my way')]);
     const plan = planScopeCapture(s, USER, CTX, settings);
     assert.equal(plan.captured, true);
@@ -222,7 +222,7 @@ test('planScopeCapture: CHAR group scope folds a non-user Incoming sender in as 
 
 test('planScopeCapture: recap-dedup drops the overlapping prefix before appending', () => {
     const settings = { conversations: { c1: {
-        id: 'c1', participants: ['Rosa'], lastActive: 5,
+        id: 'c1', participants: ['Rosa'], lastActive: 5, tethered: true, roleplayChatId: 'chat-1',
         messages: [{ role: 'assistant', content: 'hey' }, { role: 'user', content: 'hi Rosa' }],
     } } };
     // Reconstructed messages: Outgoing 'hi Rosa' -> user 'hi Rosa' (matches the stored tail's last
@@ -236,7 +236,7 @@ test('planScopeCapture: recap-dedup drops the overlapping prefix before appendin
 
 test('planScopeCapture: a scope that dedupes to nothing is NOT captured', () => {
     const settings = { conversations: { c1: {
-        id: 'c1', participants: ['Rosa'], lastActive: 5,
+        id: 'c1', participants: ['Rosa'], lastActive: 5, tethered: true, roleplayChatId: 'chat-1',
         messages: [{ role: 'assistant', content: 'hey' }],
     } } };
     const s = scope('Tim', null, [inc('Rosa', 'hey')]); // reconstructs to [assistant 'hey'] == stored tail
@@ -249,4 +249,39 @@ test('planScopeCapture: empty-text lines are dropped from the messages', () => {
     const plan = planScopeCapture(s, USER, CTX, settings);
     assert.deepEqual(plan.messages, [{ role: 'assistant', content: 'hey' }]);
     assert.equal(plan.unreadIncrement, 1);
+});
+
+test('planScopeCapture routes into an existing thread ONLY when it is tethered to this roleplayChatId', () => {
+    const settings = { conversations: {} };
+    // A tethered Blake thread scoped to chat-1 with prior messages.
+    const tethered = { id: 'c-teth', participants: ['Blake'], messages: [{ role: 'assistant', content: 'earlier' }], lastActive: 10, tethered: true, roleplayChatId: 'chat-1' };
+    settings.conversations['c-teth'] = tethered;
+    const scope1 = { owner: 'Tim', title: null, lines: [{ direction: 'Incoming', sender: 'Blake', text: 'new msg' }], lineIndices: [] };
+    const decision = { captured: true, perspective: 'USER', ownerEntryName: null };
+    const ctx = { userName: 'Tim', userNicknames: [], castRoster: [{ entryName: 'Blake', fullName: 'Blake Wolfe' }], characterNicknames: {}, roleplayChatId: 'chat-1' };
+    const plan = planScopeCapture(scope1, decision, ctx, settings);
+    assert.equal(plan.captured, true);
+    assert.equal(plan.existingConversationId, 'c-teth');
+});
+
+test('planScopeCapture does NOT route into an untethered same-participants thread (creates fresh)', () => {
+    const settings = { conversations: {} };
+    settings.conversations['c-unteth'] = { id: 'c-unteth', participants: ['Blake'], messages: [{ role: 'assistant', content: 'earlier' }], lastActive: 10, tethered: false, roleplayChatId: null };
+    const scope1 = { owner: 'Tim', title: null, lines: [{ direction: 'Incoming', sender: 'Blake', text: 'new msg' }], lineIndices: [] };
+    const decision = { captured: true, perspective: 'USER', ownerEntryName: null };
+    const ctx = { userName: 'Tim', userNicknames: [], castRoster: [{ entryName: 'Blake', fullName: 'Blake Wolfe' }], characterNicknames: {}, roleplayChatId: 'chat-1' };
+    const plan = planScopeCapture(scope1, decision, ctx, settings);
+    assert.equal(plan.captured, true);
+    assert.equal(plan.existingConversationId, null); // fresh thread
+});
+
+test('planScopeCapture does NOT route into a thread tethered to a DIFFERENT roleplayChatId', () => {
+    const settings = { conversations: {} };
+    settings.conversations['c-other'] = { id: 'c-other', participants: ['Blake'], messages: [{ role: 'assistant', content: 'earlier' }], lastActive: 10, tethered: true, roleplayChatId: 'chat-OTHER' };
+    const scope1 = { owner: 'Tim', title: null, lines: [{ direction: 'Incoming', sender: 'Blake', text: 'new msg' }], lineIndices: [] };
+    const decision = { captured: true, perspective: 'USER', ownerEntryName: null };
+    const ctx = { userName: 'Tim', userNicknames: [], castRoster: [{ entryName: 'Blake', fullName: 'Blake Wolfe' }], characterNicknames: {}, roleplayChatId: 'chat-1' };
+    const plan = planScopeCapture(scope1, decision, ctx, settings);
+    assert.equal(plan.captured, true);
+    assert.equal(plan.existingConversationId, null); // fresh — the other roleplay's thread is never touched
 });

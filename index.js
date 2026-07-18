@@ -2885,7 +2885,8 @@ async function weyPhoneMainChatInterceptor() {
 
         let plan = { cautionBlock: null, groups: [] };
         if (active) {
-            const tetheredConversations = Object.values(settings.conversations).filter(c => c.tethered);
+            const tetheredConversations = Object.values(settings.conversations)
+                .filter(c => c.tethered && c.roleplayChatId === context.chatId);
             const userName = context.name1 || 'User';
             plan = buildMainChatInjectionPlan({
                 tetheredConversations,
@@ -2947,6 +2948,7 @@ function runHijackCaptureForMessage(context, settings, messageId) {
         userNicknames: settings.userNicknames,
         castRoster: castRosterEntries,
         characterNicknames: settings.characterNicknames,
+        roleplayChatId: context.chatId ?? null,
     };
 
     const preCaptureText = message.mes;
@@ -2967,9 +2969,10 @@ function runHijackCaptureForMessage(context, settings, messageId) {
         const wasNewlyCreated = !conversation;
         if (!conversation) {
             conversation = createConversation(settings, plan.participants);
-            // Brand-new hijacked threads start tethered so they round-trip into the roleplay on
-            // the very next generation without a manual step.
-            setTetheredSettings(settings, conversation.id, { tethered: true });
+            // Brand-new hijacked threads start tethered AND scoped to the current roleplay so they
+            // round-trip into THIS roleplay on the next generation without a manual step — and never
+            // bleed into a different roleplay with the same character.
+            setTetheredSettings(settings, conversation.id, { tethered: true, roleplayChatId: context.chatId ?? null });
         }
         const appendedMessages = [];
         for (const msg of plan.messages) {
