@@ -1467,6 +1467,12 @@
     justify-content: flex-end;
     gap: 8px;
     margin-top: 16px;
+    /* Extra bottom clearance inside the frame's own scroll area — several mobile browsers
+       (Safari's floating bottom toolbar, similar overlays elsewhere) paint UI chrome over the
+       bottom of the viewport without it counting against reported viewport height, so a button
+       flush with the frame's bottom edge can end up under that chrome. This padding gives the
+       user room to scroll the buttons up into a clear, comfortably clickable area. */
+    padding-bottom: 32px;
 }
 
 /* Import-from-Scenario confirm overlay — same floating-frame pattern as Configure-Nicknames
@@ -1507,6 +1513,9 @@
     justify-content: flex-end;
     gap: 8px;
     margin-top: 16px;
+    /* See the matching comment on #wp-nickname-config-overlay .wp-nick-actions above — same
+       mobile-browser-chrome clearance reasoning. */
+    padding-bottom: 32px;
 }
 
 /* WeyPhone confirm dialog — the shared Yes/No overlay used by the tether/untether flows.
@@ -1547,6 +1556,9 @@
     justify-content: flex-end;
     gap: 8px;
     margin-top: 16px;
+    /* See the matching comment on #wp-nickname-config-overlay .wp-nick-actions above — same
+       mobile-browser-chrome clearance reasoning. */
+    padding-bottom: 32px;
 }
 
 .wp-tether-chain {
