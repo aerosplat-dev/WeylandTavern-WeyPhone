@@ -1613,3 +1613,16 @@
     margin-left: 4px;
     vertical-align: baseline;
 }
+
+/* Extension-settings capture tools (settings.html) — the "Capture Last Message" / "Undo Last
+   Capture" buttons are gated on an active roleplay + available snapshot (refreshCaptureToolsAvailability
+   sets the `disabled` attribute). Stock ST's `.menu_button` does NOT dim a disabled <input> button
+   — computed opacity stays 1 and the cursor stays a pointer — so a disabled tool looked identical to
+   an enabled one, giving no signal that a tap will do nothing. Match the same disabled treatment used
+   for `.wp-popup-menu-item:disabled` above (opacity 0.4 + not-allowed cursor) so the state reads
+   clearly on a small screen. */
+#wp-settings-capture-last-button:disabled,
+#wp-settings-undo-capture-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
